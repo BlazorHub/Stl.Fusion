@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Concurrent;
-using System.Collections.Generic;
 using System.Linq;
 using System.Reactive;
 using System.Threading.Channels;
@@ -35,8 +34,8 @@ namespace Stl.Channels
 
         public ChannelHub()
         {
-            var concurrencyLevel = HardwareInfo.ProcessorCount << 2;
-            var capacity = 7919;
+            var concurrencyLevel = HardwareInfo.GetProcessorCountFactor(4, 4);
+            var capacity = OSInfo.IsWebAssembly ? 17 : 509;
             Channels = new ConcurrentDictionary<Channel<T>, Unit>(concurrencyLevel, capacity);
         }
 
@@ -45,7 +44,7 @@ namespace Stl.Channels
             if (channel == null)
                 throw new ArgumentNullException(nameof(channel));
             ThrowIfDisposedOrDisposing();
-            
+
             if (!Channels.TryAdd(channel, default))
                 return false;
             OnAttached(channel);
@@ -57,14 +56,14 @@ namespace Stl.Channels
             if (channel == null)
                 throw new ArgumentNullException(nameof(channel));
             ThrowIfDisposedOrDisposing();
-            
+
             if (!Channels.TryRemove(channel, out _))
                 return false;
             await OnDetachedAsync(channel).ConfigureAwait(false);
             return true;
         }
 
-        public bool IsAttached(Channel<T> channel) 
+        public bool IsAttached(Channel<T> channel)
             => Channels.TryGetValue(channel, out _);
 
         protected virtual void OnAttached(Channel<T> channel)
@@ -77,7 +76,7 @@ namespace Stl.Channels
 
         protected virtual async ValueTask OnDetachedAsync(Channel<T> channel)
         {
-            var taskCollector = Collector<ValueTask>.New();
+            var taskCollector = Collector<ValueTask>.New(true);
             try {
                 Detached?.Invoke(channel, ref taskCollector);
 
@@ -120,7 +119,7 @@ namespace Stl.Channels
         {
             while (!Channels.IsEmpty) {
                 var tasks = Channels
-                    .Take(HardwareInfo.ProcessorCount * 4)
+                    .Take(HardwareInfo.GetProcessorCountFactor(4, 4))
                     .ToList()
                     .Select(p => Task.Run(async () => {
                         var channel = p.Key;

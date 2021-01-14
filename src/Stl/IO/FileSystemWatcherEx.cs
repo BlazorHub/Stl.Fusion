@@ -1,6 +1,5 @@
 using System;
 using System.IO;
-using System.Reactive;
 using System.Reactive.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -34,7 +33,7 @@ namespace Stl.IO
                 .Select(p => p.EventArgs);
             return o1.Merge(o2).Publish().RefCount();
         }
-        
+
         public static Task<FileSystemEventArgs> FirstAsync(
             this FileSystemWatcher watcher,
             CancellationToken cancellationToken = default)

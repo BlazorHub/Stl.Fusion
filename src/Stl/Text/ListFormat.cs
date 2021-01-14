@@ -1,17 +1,16 @@
 using System;
-using System.Collections;
 using System.Collections.Generic;
 using System.Text;
 using Stl.Collections;
 using Stl.Internal;
 
-namespace Stl.Text 
+namespace Stl.Text
 {
     public readonly struct ListFormat
     {
-        public static readonly ListFormat Default = new ListFormat('|');
-        public static readonly ListFormat CommaSeparated = new ListFormat(',');
-        public static readonly ListFormat TabSeparated = new ListFormat('\t');
+        public static readonly ListFormat Default = new('|');
+        public static readonly ListFormat CommaSeparated = new(',');
+        public static readonly ListFormat TabSeparated = new('\t');
 
         public readonly char Delimiter;
         public readonly char Escape;
@@ -24,16 +23,16 @@ namespace Stl.Text
             NoItems = noItems;
         }
 
-        public ListFormatter CreateFormatter(StringBuilder? output = null, int itemIndex = 0)
-            => new ListFormatter(this, output ?? new StringBuilder(), itemIndex);
+        public ListFormatter CreateFormatter(StringBuilder output, int itemIndex = 0)
+            => new(this, output, itemIndex);
 
-        public ListParser CreateParser(in ReadOnlySpan<char> source, StringBuilder? item = null, int itemIndex = 0)
-            => new ListParser(this, source, item ?? new StringBuilder(), itemIndex);
+        public ListParser CreateParser(in ReadOnlySpan<char> source, StringBuilder item, int itemIndex = 0)
+            => new(this, source, item, itemIndex);
     }
 
     public ref struct ListFormatter
     {
-        public ListFormat Format => new ListFormat(Delimiter, Escape, NoItems);
+        public ListFormat Format => new(Delimiter, Escape, NoItems);
         public readonly char Delimiter;
         public readonly char Escape;
         public readonly string NoItems;
@@ -108,8 +107,8 @@ namespace Stl.Text
         public readonly char Delimiter;
         public readonly char Escape;
         public readonly string NoItems;
+        public readonly StringBuilder ItemBuilder;
         public ReadOnlySpan<char> Source;
-        public StringBuilder ItemBuilder;
         public string Item => ItemBuilder.ToString();
         public int ItemIndex;
 
@@ -144,8 +143,8 @@ namespace Stl.Text
                 ItemBuilder.Append(Source[index]);
             }
 
-            if (ItemIndex == 1 
-                && (ItemBuilder.Length - startLength) == NoItems.Length 
+            if (ItemIndex == 1
+                && (ItemBuilder.Length - startLength) == NoItems.Length
                 && Source.Length == (NoItems.Length << 1)) {
                 // Special case: possibly it's an empty list marker
                 var noItems = true;

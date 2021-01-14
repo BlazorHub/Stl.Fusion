@@ -1,26 +1,30 @@
 using System;
 using System.Runtime.CompilerServices;
 using System.Threading;
-using System.Threading.Channels;
 using System.Threading.Tasks;
 using Stl.Async;
 using Stl.Fusion.Bridge.Internal;
-using Stl.Fusion.Bridge.Messages;
-using Stl.Internal;
 using Stl.Text;
 using Stl.Time;
+using Errors = Stl.Internal.Errors;
 
 namespace Stl.Fusion.Bridge
 {
-    public interface IPublication : IHasId<Symbol>, IAsyncDisposable
+    public interface IPublication : IAsyncProcess
     {
         IPublisher Publisher { get; }
+        Symbol Id { get; }
+        PublicationRef Ref { get; }
         IPublicationState State { get; }
         long UseCount { get; }
-        
+
+        Type GetResultType();
         Disposable<IPublication> Use();
         bool Touch();
         ValueTask UpdateAsync(CancellationToken cancellationToken);
+
+        // Convenience helpers
+        TResult Apply<TArg, TResult>(IPublicationApplyHandler<TArg, TResult> handler, TArg arg);
     }
 
     public interface IPublication<T> : IPublication
@@ -28,19 +32,12 @@ namespace Stl.Fusion.Bridge
         new IPublicationState<T> State { get; }
     }
 
-    public interface IPublicationImpl : IPublication, IAsyncProcess
-    {
-        SubscriptionProcessor CreateSubscriptionProcessor(Channel<Message> channel, SubscribeMessage subscribeMessage);
-    }
-
-    public interface IPublicationImpl<T> : IPublicationImpl, IPublication<T> { }
-
-    public class Publication<T> : AsyncProcessBase, IPublicationImpl<T>
+    public class Publication<T> : AsyncProcessBase, IPublication<T>
     {
         private long _lastTouchTime;
         private long _useCount;
 
-        protected readonly IMomentClock Clock;
+        protected IMomentClock Clock { get; }
         protected volatile IPublicationStateImpl<T> StateField;
         protected IPublisherImpl PublisherImpl => (IPublisherImpl) Publisher;
         protected Moment LastTouchTime {
@@ -54,13 +51,15 @@ namespace Stl.Fusion.Bridge
         public Type PublicationType { get; }
         public IPublisher Publisher { get; }
         public Symbol Id { get; }
+        public PublicationRef Ref => new(Publisher.Id, Id);
         IPublicationState IPublication.State => State;
         public IPublicationState<T> State => StateField;
         public long UseCount => Volatile.Read(ref _useCount);
 
         public Publication(
-            Type publicationType, IPublisher publisher, 
-            IComputed<T> computed, Symbol id, IMomentClock clock)
+            Type publicationType, IPublisher publisher,
+            IComputed<T> computed, Symbol id,
+            IMomentClock? clock)
         {
             Clock = clock ??= CoarseCpuClock.Instance;
             PublicationType = publicationType;
@@ -69,6 +68,9 @@ namespace Stl.Fusion.Bridge
             LastTouchTime = clock.Now;
             StateField = CreatePublicationState(computed);
         }
+
+        public Type GetResultType()
+            => typeof(T);
 
         public bool Touch()
         {
@@ -93,7 +95,7 @@ namespace Stl.Fusion.Bridge
         public async ValueTask UpdateAsync(CancellationToken cancellationToken)
         {
             var state = StateField;
-            if (state.IsDisposed || state.Computed.IsConsistent)
+            if (state.IsDisposed || state.Computed.IsConsistent())
                 return;
             var newComputed = await state.Computed
                 .UpdateAsync(false, cancellationToken).ConfigureAwait(false);
@@ -101,15 +103,20 @@ namespace Stl.Fusion.Bridge
             ChangeState(newState, state);
         }
 
+        public TResult Apply<TArg, TResult>(IPublicationApplyHandler<TArg, TResult> handler, TArg arg)
+            => handler.Apply(this, arg);
+
+        // Protected methods
+
         protected virtual IPublicationStateImpl<T> CreatePublicationState(
-            IComputed<T> computed, bool isDisposed = false) 
+            IComputed<T> computed, bool isDisposed = false)
             => new PublicationState<T>(this, computed, Clock.Now, isDisposed);
 
-        protected override async Task RunInternalAsync(CancellationToken cancellationToken) 
+        protected override async Task RunInternalAsync(CancellationToken cancellationToken)
         {
             try {
                 await ExpireAsync(cancellationToken).ConfigureAwait(false);
-            } 
+            }
             finally {
                 // Awaiting for disposal here = cyclic task dependency;
                 // we should just ensure it starts right when this method
@@ -122,13 +129,13 @@ namespace Stl.Fusion.Bridge
         {
             var expirationTime = PublisherImpl.PublicationExpirationTime;
 
-            Moment GetLastUseTime() 
+            Moment GetLastUseTime()
                 => UseCount > 0 ? CoarseCpuClock.Now : LastTouchTime;
-            Moment GetNextCheckTime(Moment start, Moment lastUseTime) 
+            Moment GetNextCheckTime(Moment start, Moment lastUseTime)
                 => lastUseTime + expirationTime;
 
             // Uncomment for debugging:
-            // await Task.Delay(TimeSpan.FromMinutes(10), cancellationToken).ConfigureAwait(false); 
+            // await Task.Delay(TimeSpan.FromMinutes(10), cancellationToken).ConfigureAwait(false);
 
             try {
                 var start = CoarseCpuClock.Now;
@@ -150,15 +157,10 @@ namespace Stl.Fusion.Bridge
             }
         }
 
-        SubscriptionProcessor IPublicationImpl.CreateSubscriptionProcessor(Channel<Message> channel, SubscribeMessage subscribeMessage) 
-            => CreateSubscriptionProcessor(channel, subscribeMessage);
-        protected virtual SubscriptionProcessor CreateSubscriptionProcessor(Channel<Message> channel, SubscribeMessage subscribeMessage)
-            => new SubscriptionProcessor<T>(this, channel, subscribeMessage);
-
         protected override Task DisposeAsync(bool disposing)
         {
             // We override this method to make sure State is the first thing
-            // to reflect the disposal. 
+            // to reflect the disposal.
             var state = StateField;
             if (state.IsDisposed)
                 return Task.CompletedTask;

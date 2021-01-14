@@ -10,65 +10,67 @@ namespace Stl.Fusion.Bridge.Internal
 {
     public interface IPublicationFactory
     {
-        public IPublication Create(
-            Type publicationType, IPublisher publisher, 
-            IComputed computed, Symbol publicationId, IMomentClock clock);
+        public IPublication Create(Type genericType,
+            IPublisher publisher, IComputed computed,
+            Symbol publicationId, IMomentClock clock);
     }
 
     public sealed class PublicationFactory : IPublicationFactory
     {
-        private delegate IPublication Constructor(IPublisher publisher, 
-            IComputed computed, Symbol publicationId, IMomentClock clock);
+        private delegate IPublication Constructor(
+            IPublisher publisher, IComputed computed,
+            Symbol publicationId, IMomentClock clock);
 
-        private static readonly ConcurrentDictionary<Type, Constructor> ConstructorCache =
-            new ConcurrentDictionary<Type, Constructor>();
+        private static readonly ConcurrentDictionary<Type, Constructor> ConstructorCache = new();
         private static readonly Func<Type, Constructor> CreateCache = Create;
 
-        public static PublicationFactory Instance { get; } = new PublicationFactory();
-        
+        public static PublicationFactory Instance { get; } = new();
+
         private PublicationFactory() { }
 
-        public IPublication Create(Type publicationType, IPublisher publisher, 
-            IComputed computed, Symbol publicationId, IMomentClock clock) 
+        public IPublication Create(Type genericType,
+            IPublisher publisher, IComputed computed,
+            Symbol publicationId, IMomentClock clock)
             => ConstructorCache
-                .GetOrAddChecked(publicationType, CreateCache)
+                .GetOrAddChecked(genericType, CreateCache)
                 .Invoke(publisher, computed, publicationId, clock);
 
-        private static Constructor Create(Type publicationType)
+        private static Constructor Create(Type genericType)
         {
-            if (!publicationType.IsGenericTypeDefinition)
-                throw Errors.PublicationTypeMustBeOpenGenericType(nameof(publicationType));
-                
-            var handler = new FactoryApplyHandler(publicationType);
-                
-            IPublication Factory(IPublisher publisher, IComputed computed, Symbol publicationId, IMomentClock clock) 
+            if (!genericType.IsGenericTypeDefinition)
+                throw Errors.TypeMustBeOpenGenericType(genericType);
+
+            var handler = new FactoryApplyHandler(genericType);
+
+            IPublication Factory(
+                IPublisher publisher, IComputed computed,
+                Symbol publicationId, IMomentClock clock)
                 => computed.Apply(handler, (publisher, publicationId, clock));
 
             return Factory;
         }
 
         private class FactoryApplyHandler : IComputedApplyHandler<
-            (IPublisher Publisher, Symbol PublicationId, IMomentClock Clock), 
+            (IPublisher Publisher, Symbol PublicationId, IMomentClock Clock),
             IPublication>
         {
-            private readonly Type _publicationType;
-            private readonly ConcurrentDictionary<Type, Type> _closedTypeCache =
-                new ConcurrentDictionary<Type, Type>();
+            private readonly Type _genericType;
+            private readonly ConcurrentDictionary<Type, Type> _closedTypeCache = new();
 
-            public FactoryApplyHandler(Type publicationType) 
-                => _publicationType = publicationType;
+            public FactoryApplyHandler(Type genericType)
+                => _genericType = genericType;
 
             public IPublication Apply<TIn, TOut>(
-                IComputed<TIn, TOut> computed, 
-                (IPublisher Publisher, Symbol PublicationId, IMomentClock Clock) arg) 
+                IComputed<TIn, TOut> computed,
+                (IPublisher Publisher, Symbol PublicationId, IMomentClock Clock) arg)
                 where TIn : ComputedInput
             {
                 var closedType = _closedTypeCache.GetOrAddChecked(
-                    typeof(TOut), 
-                    (tArg, tGeneric) => tGeneric.MakeGenericType(tArg), 
-                    _publicationType);
+                    typeof(TOut),
+                    (tArg, tGeneric) => tGeneric.MakeGenericType(tArg),
+                    _genericType);
                 return (IPublication) closedType.CreateInstance(
-                    _publicationType, arg.Publisher, 
+                    _genericType, arg.Publisher,
                     (IComputed<TOut>) computed, arg.PublicationId, arg.Clock);
             }
         }

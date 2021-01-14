@@ -19,8 +19,8 @@ namespace Stl.Tests.Async
 
             protected override async ValueTask DisposeInternalAsync(bool disposing)
             {
-                await Task.Delay(DisposeDelay); 
-            } 
+                await Task.Delay(DisposeDelay);
+            }
         }
 
         public AsyncDisposableTest(ITestOutputHelper @out) : base(@out) { }
@@ -28,7 +28,7 @@ namespace Stl.Tests.Async
         [Fact]
         public async Task DisposeAsyncTest()
         {
-            if (TestRunnerInfo.GitHub.IsActionRunning)
+            if (TestRunnerInfo.IsBuildAgent())
                 // TODO: Fix intermittent failures on GitHub
                 return;
             AsyncDisposableWithDelay? copy = null;

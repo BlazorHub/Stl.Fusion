@@ -67,18 +67,18 @@ namespace Stl.Tests.Async
             private async ValueTask Delay(int delayMs, CancellationToken cancellationToken)
             {
                 await Task.Delay(delayMs, cancellationToken).ConfigureAwait(false);
-                
+
                 // Let's add a "spread" that's not ms-based
                 var sw = new SpinWait();
-                var spinCount = (delayMs * 347) & 15;
+                var spinCount = (delayMs * 347) & 7;
                 for (var i = 0; i < spinCount; i++)
-                    sw.SpinOnce(int.MaxValue);
+                    sw.SpinOnce(-1);
             }
         }
 
         public AsyncLockTestBase(ITestOutputHelper @out) : base(@out) { }
 
-        protected abstract IAsyncLock CreateAsyncLock(ReentryMode reentryMode); 
+        protected abstract IAsyncLock CreateAsyncLock(ReentryMode reentryMode);
         protected abstract void AssertResourcesReleased();
 
         [Fact]
@@ -96,7 +96,7 @@ namespace Stl.Tests.Async
             };
             await Task.WhenAll(tasks);
             tasks.All(t => t.IsCompletedSuccessfully).Should().BeTrue();
-            
+
             AssertResourcesReleased();
         }
 
@@ -118,18 +118,15 @@ namespace Stl.Tests.Async
         [Fact]
         public async Task ConcurrentTest()
         {
-            if (TestRunnerInfo.GitHub.IsActionRunning)
-                // TODO: Fix intermittent failures on GitHub
-                return;
-
             var r = new Resource(CreateAsyncLock(ReentryMode.CheckedPass));
             var rnd = new Random();
             var tasks = new List<Task>();
 
-            const int taskCount = 200;
-            const int maxDelayMs = 100;
-            const int maxDurationMs = 3;
-            const int maxReentryCount = 5;
+            var taskCount = TestRunnerInfo.IsBuildAgent() ? 2 : HardwareInfo.GetProcessorCountFactor(4);
+            var maxDelayMs = 100;
+            var maxDurationMs = 3;
+            var maxReentryCount = 5;
+
             for (var i = 0; i < taskCount; i++) {
                 var delayMs = rnd.Next(maxDelayMs);
                 var durationMs = rnd.Next(maxDurationMs);
@@ -140,7 +137,7 @@ namespace Stl.Tests.Async
             }
 
             var expectedRuntime = TimeSpan.FromMilliseconds(
-                5 * maxDelayMs + maxDurationMs * maxReentryCount * taskCount);
+                1000 + maxDelayMs + taskCount * maxDurationMs * maxReentryCount);
             Out.WriteLine($"Expected runtime: {expectedRuntime.Seconds:f1}s");
             var start = CpuClock.Now;
             await Task.WhenAll(tasks).AsAsyncFunc()

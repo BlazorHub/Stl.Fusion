@@ -1,3 +1,4 @@
+using System;
 using System.IO;
 using System.Runtime.Serialization.Formatters.Binary;
 using Newtonsoft.Json;
@@ -12,20 +13,21 @@ namespace Stl.Testing
             SerializationBinder = CrossPlatformSerializationBinder.Instance,
             Formatting = Formatting.Indented,
 //            ContractResolver = new PreferSerializableContractResolver(),
-        }; 
+        };
 
         public static T PassThroughAllSerializers<T>(this T value)
         {
             var v = value.PassThroughJsonConvert();
-            v = v.PassThroughBinaryFormatter();
+            v = v.PassThroughJsonSerialized();
             return v;
         }
 
-        public static (T, string) PassThroughAllSerializersWithOutput<T>(this T value)
+        public static (T, string[]) PassThroughAllSerializersWithOutput<T>(this T value)
         {
-            var (v, json) = value.PassThroughJsonConvertWithOutput(); 
-            v = v.PassThroughBinaryFormatter();
-            return (v, json);
+            var delimiter = Environment.NewLine + Environment.NewLine;
+            var (v1, json1) = value.PassThroughJsonConvertWithOutput();
+            var (v2, json2) = v1.PassThroughJsonSerializedWithOutput();
+            return (v2, new [] {json1, json2});
         }
 
         public static T PassThroughJsonConvert<T>(this T value)
@@ -35,7 +37,7 @@ namespace Stl.Testing
             box = JsonConvert.DeserializeObject<Box<T>>(json, JsonSerializerSettings)!;
             return box.Value;
         }
-        
+
         public static (T, string) PassThroughJsonConvertWithOutput<T>(this T value)
         {
             var box = Box.New(value);
@@ -43,16 +45,19 @@ namespace Stl.Testing
             box = JsonConvert.DeserializeObject<Box<T>>(json, JsonSerializerSettings)!;
             return (box.Value, json);
         }
-        
-        public static T PassThroughBinaryFormatter<T>(this T value)
+
+        public static T PassThroughJsonSerialized<T>(this T value)
         {
-            var box = Box.New(value);
-            var ms = new MemoryStream();
-            var bf = new BinaryFormatter();
-            bf.Serialize(ms, box);
-            ms.Seek(0, SeekOrigin.Begin);
-            box = (Box<T>) bf.Deserialize(ms);
-            return box.Value;
+            var v1 = JsonSerialized.New(value);
+            var v2 = JsonSerialized.New<T>(v1.SerializedValue);
+            return v2.Value;
+        }
+
+        public static (T, string) PassThroughJsonSerializedWithOutput<T>(this T value)
+        {
+            var v1 = JsonSerialized.New(value);
+            var v2 = JsonSerialized.New<T>(v1.SerializedValue);
+            return (v2.Value, v1.SerializedValue);
         }
     }
 }

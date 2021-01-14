@@ -8,20 +8,13 @@ namespace Stl.Reflection
 {
     public static class ActivatorEx
     {
-        private static readonly ConcurrentDictionary<Type, bool> HasDefaultCtorCache =
-            new ConcurrentDictionary<Type, bool>();
-        private static readonly ConcurrentDictionary<Type, Delegate?> CtorDelegate0Cache =
-            new ConcurrentDictionary<Type, Delegate?>();
-        private static readonly ConcurrentDictionary<(Type, Type), Delegate?> CtorDelegate1Cache =
-            new ConcurrentDictionary<(Type, Type), Delegate?>();
-        private static readonly ConcurrentDictionary<(Type, Type, Type), Delegate?> CtorDelegate2Cache =
-            new ConcurrentDictionary<(Type, Type, Type), Delegate?>();
-        private static readonly ConcurrentDictionary<(Type, Type, Type, Type), Delegate?> CtorDelegate3Cache =
-            new ConcurrentDictionary<(Type, Type, Type, Type), Delegate?>();
-        private static readonly ConcurrentDictionary<(Type, Type, Type, Type, Type), Delegate?> CtorDelegate4Cache =
-            new ConcurrentDictionary<(Type, Type, Type, Type, Type), Delegate?>();
-        private static readonly ConcurrentDictionary<(Type, Type, Type, Type, Type, Type), Delegate?> CtorDelegate5Cache =
-            new ConcurrentDictionary<(Type, Type, Type, Type, Type, Type), Delegate?>();
+        private static readonly ConcurrentDictionary<Type, bool> HasDefaultCtorCache = new();
+        private static readonly ConcurrentDictionary<Type, Delegate?> CtorDelegate0Cache = new();
+        private static readonly ConcurrentDictionary<(Type, Type), Delegate?> CtorDelegate1Cache = new();
+        private static readonly ConcurrentDictionary<(Type, Type, Type), Delegate?> CtorDelegate2Cache = new();
+        private static readonly ConcurrentDictionary<(Type, Type, Type, Type), Delegate?> CtorDelegate3Cache = new();
+        private static readonly ConcurrentDictionary<(Type, Type, Type, Type, Type), Delegate?> CtorDelegate4Cache = new();
+        private static readonly ConcurrentDictionary<(Type, Type, Type, Type, Type, Type), Delegate?> CtorDelegate5Cache = new();
 
         // An alternative to "new()" constraint
         public static T New<T>(bool failIfNoDefaultConstructor = true)
@@ -29,7 +22,7 @@ namespace Stl.Reflection
             var type = typeof(T);
             if (type.IsValueType)
                 return default!;
-            var hasDefaultCtor = HasDefaultCtorCache.GetOrAddChecked(type, 
+            var hasDefaultCtor = HasDefaultCtorCache.GetOrAddChecked(type,
                 type1 => type1.GetConstructor(Array.Empty<Type>()) != null);
             if (hasDefaultCtor)
                 return (T) type.CreateInstance();
@@ -38,7 +31,7 @@ namespace Stl.Reflection
             return default!;
         }
 
-        public static Delegate? GetConstructorDelegate(this Type type) 
+        public static Delegate? GetConstructorDelegate(this Type type)
             => CtorDelegate0Cache.GetOrAddChecked(type, tObject => {
                 var argTypes = new Type[0];
                 var ctor = tObject.GetConstructor(argTypes);
@@ -90,10 +83,10 @@ namespace Stl.Reflection
                 return Expression.Lambda(eCtor, eArgs).Compile();
             });
 
-        public static Delegate? GetConstructorDelegate(this Type type, 
+        public static Delegate? GetConstructorDelegate(this Type type,
             Type argument1, Type argument2, Type argument3, Type argument4)
             => CtorDelegate4Cache.GetOrAddChecked(
-                (type, argument1, argument2, argument3, argument4), 
+                (type, argument1, argument2, argument3, argument4),
                 key => {
                     var (tObject, tArg1, tArg2, tArg3, tArg4) = key;
                     var ctor = tObject.GetConstructor(new[] {tArg1, tArg2, tArg3, tArg4});
@@ -109,10 +102,10 @@ namespace Stl.Reflection
                     return Expression.Lambda(eCtor, eArgs).Compile();
                 });
 
-        public static Delegate? GetConstructorDelegate(this Type type, 
+        public static Delegate? GetConstructorDelegate(this Type type,
             Type argument1, Type argument2, Type argument3, Type argument4, Type argument5)
             => CtorDelegate5Cache.GetOrAddChecked(
-                (type, argument1, argument2, argument3, argument4, argument5), 
+                (type, argument1, argument2, argument3, argument4, argument5),
                 key => {
                     var (tObject, tArg1, tArg2, tArg3, tArg4, tArg5) = key;
                     var ctor = tObject.GetConstructor(new[] {tArg1, tArg2, tArg3, tArg4, tArg5});
@@ -128,6 +121,17 @@ namespace Stl.Reflection
                     var eCtor = Expression.New(ctor, eArgs);
                     return Expression.Lambda(eCtor, eArgs).Compile();
                 });
+
+        public static Func<T1, object> GetConstructorDelegate<T1>(this Type type, T1 argument1)
+            => (Func<T1, object>) type.GetConstructorDelegate(typeof(T1))!;
+        public static Func<T1, T2, object> GetConstructorDelegate<T1, T2>(this Type type, T1 argument1, T2 argument2)
+            => (Func<T1, T2, object>) type.GetConstructorDelegate(typeof(T1), typeof(T2))!;
+        public static Func<T1, T2, T3, object> GetConstructorDelegate<T1, T2, T3>(this Type type, T1 argument1, T2 argument2, T3 argument3)
+            => (Func<T1, T2, T3, object>) type.GetConstructorDelegate(typeof(T1), typeof(T2), typeof(T3))!;
+        public static Func<T1, T2, T3, T4, object> GetConstructorDelegate<T1, T2, T3, T4>(this Type type, T1 argument1, T2 argument2, T3 argument3, T4 argument4)
+            => (Func<T1, T2, T3, T4, object>) type.GetConstructorDelegate(typeof(T1), typeof(T2), typeof(T3), typeof(T4))!;
+        public static Func<T1, T2, T3, T4, T5, object> GetConstructorDelegate<T1, T2, T3, T4, T5>(this Type type, T1 argument1, T2 argument2, T3 argument3, T4 argument4, T5 argument5)
+            => (Func<T1, T2, T3, T4, T5, object>) type.GetConstructorDelegate(typeof(T1), typeof(T2), typeof(T3), typeof(T4), typeof(T5))!;
 
         public static object CreateInstance(this Type type)
         {

@@ -10,11 +10,11 @@ namespace Stl.Testing.Internal
         protected static readonly string EnvNewLine = Environment.NewLine;
         protected static readonly char LastEnvNewLineChar = EnvNewLine[^1];
 
-        protected StringBuilder Prefix = new StringBuilder();
+        protected StringBuilder Prefix = new();
         public ITestOutputHelper TestOutput { get; }
         public override Encoding Encoding { get; } = Encoding.UTF8;
 
-        public TestOutputWriter(ITestOutputHelper testOutput) 
+        public TestOutputWriter(ITestOutputHelper testOutput)
             => TestOutput = testOutput;
 
         public override void Write(char value)
@@ -38,6 +38,6 @@ namespace Stl.Testing.Internal
             Prefix.Clear();
             Prefix.Append(lines[^1]);
         }
-    }        
+    }
 
 }

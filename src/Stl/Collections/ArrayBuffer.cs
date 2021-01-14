@@ -3,6 +3,7 @@ using System.Buffers;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using Stl.Internal;
+using Stl.Mathematics;
 
 namespace Stl.Collections
 {
@@ -14,8 +15,8 @@ namespace Stl.Collections
     // ArrayBuffer isn't a ref struct, so you can store it in fields.
     public struct ArrayBuffer<T> : IDisposable
     {
-        public const int MinCapacity = 1;
-        public const int DefaultCapacity = 16;
+        public const int MinCapacity = 8;
+        public const int MaxCapacity = 1 << 30;
         private static readonly ArrayPool<T> Pool = ArrayPool<T>.Shared;
 
         private int _count;
@@ -23,6 +24,7 @@ namespace Stl.Collections
         public T[] Buffer { get; private set; }
         public Span<T> Span => Buffer.AsSpan(0, Count);
         public int Capacity => Buffer.Length;
+        public bool MustClean { get; }
         public int Count {
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
             get => _count;
@@ -37,40 +39,36 @@ namespace Stl.Collections
         public T this[int index] {
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
             get => index < Count ? Buffer[index] : throw new IndexOutOfRangeException();
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            set {
-                if (index >= Count) throw new IndexOutOfRangeException();
-                Buffer[index] = value;
-            }
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private ArrayBuffer(int capacity)
+        private ArrayBuffer(bool mustClean, int capacity)
         {
-            if (capacity < MinCapacity)
-                capacity = MinCapacity;
+            MustClean = mustClean;
+            capacity = ComputeCapacity(capacity, MinCapacity);
             Buffer = Pool.Rent(capacity);
             _count = 0;
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static ArrayBuffer<T> Lease(int capacity = DefaultCapacity) 
-            => new ArrayBuffer<T>(capacity);
+        public static ArrayBuffer<T> Lease(bool mustClean, int capacity = MinCapacity)
+            => new ArrayBuffer<T>(mustClean, capacity);
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static ArrayBuffer<T> LeaseAndSetCount(int count) 
-            => new ArrayBuffer<T>(count) {Count = count};
+        public static ArrayBuffer<T> LeaseAndSetCount(bool mustClean, int count)
+            => new ArrayBuffer<T>(mustClean, count) {Count = count};
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public void Dispose()
         {
+            // ReSharper disable once ConditionIsAlwaysTrueOrFalse
             if (Buffer != null)
-                Pool.Return(Buffer);
+                Pool.Return(Buffer, MustClean);
             Buffer = null!;
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public Span<T>.Enumerator GetEnumerator() => Span.GetEnumerator(); 
-        
+        public Span<T>.Enumerator GetEnumerator() => Span.GetEnumerator();
+
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public T[] ToArray() => Span.ToArray();
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -83,27 +81,39 @@ namespace Stl.Collections
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void SetItem(int index, T item)
+        {
+            if (index >= Count) throw new IndexOutOfRangeException();
+            Buffer[index] = item;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void AddRange(IEnumerable<T> items)
+        {
+            foreach (var item in items)
+                Add(item);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void AddRange(IReadOnlyCollection<T> items)
+        {
+            EnsureCapacity(Count + items.Count);
+            foreach (var item in items)
+                Add(item);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public void Add(T item)
         {
-            var capacity = Capacity;
-            if (Count >= capacity) {
-                var newCapacity = capacity << 1;
-                if (newCapacity < capacity)
-                    throw Errors.ZListIsTooLong();
-                Resize(newCapacity);
-            }
+            if (Count >= Capacity)
+                EnsureCapacity(Count + 1);
             Buffer[Count++] = item;
         }
 
         public void Insert(int index, T item)
         {
-            var capacity = Capacity;
-            if (Count >= capacity) {
-                var newCapacity = capacity << 1;
-                if (newCapacity < capacity)
-                    throw Errors.ZListIsTooLong();
-                Resize(newCapacity);
-            }
+            if (Count >= Capacity)
+                EnsureCapacity(Count + 1);
             var copyLength = Count - index;
             if (copyLength < 0)
                 throw new ArgumentOutOfRangeException(nameof(index));
@@ -132,31 +142,34 @@ namespace Stl.Collections
             Count = 0;
         }
 
-        public void Resize(int capacity)
-        {
-            if (capacity < MinCapacity)
-                capacity = MinCapacity;
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void CopyTo(T[] array, int arrayIndex)
+            => Buffer.CopyTo(array.AsSpan().Slice(arrayIndex));
 
-            var span = Buffer.AsSpan();
+        public void EnsureCapacity(int capacity)
+        {
+            capacity = ComputeCapacity(capacity, Capacity);
             var newLease = Pool.Rent(capacity);
-            if (capacity < Count) {
-                Count = capacity;
-                span = span.Slice(0, capacity);
-            }
-            span.CopyTo(newLease.AsSpan());
+            Span.CopyTo(newLease.AsSpan());
             ChangeLease(newLease);
         }
-
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public void CopyTo(T[] array, int arrayIndex) 
-            => Buffer.CopyTo(array.AsSpan().Slice(arrayIndex));
 
         // Private methods
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static int ComputeCapacity(int requestedCapacity, int minCapacity)
+        {
+            if (requestedCapacity < minCapacity)
+                requestedCapacity = minCapacity;
+            else if (requestedCapacity > MaxCapacity)
+                throw new ArgumentOutOfRangeException(nameof(requestedCapacity));
+            return (int) Bits.GreaterOrEqualPowerOf2((uint) requestedCapacity);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private void ChangeLease(T[] newLease)
         {
-            Pool.Return(Buffer);
+            Pool.Return(Buffer, MustClean);
             Buffer = newLease;
         }
     }

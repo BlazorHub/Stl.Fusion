@@ -11,7 +11,7 @@ namespace Stl.Time.Testing
     public sealed class TestClock : ITestClock, IDisposable
     {
         private volatile TestClockSettings _settings;
-        
+
         [JsonIgnore] public TestClockSettings Settings {
             get => _settings;
             set {
@@ -23,19 +23,18 @@ namespace Stl.Time.Testing
             }
         }
 
-        public TestClock(TestClockSettings settings) 
+        public TestClock(TestClockSettings settings)
             => _settings = settings;
-        public TestClock(TimeSpan localOffset = default, TimeSpan realOffset = default, double multiplier = 1) 
+        public TestClock(TimeSpan localOffset = default, TimeSpan realOffset = default, double multiplier = 1)
             => _settings = new TestClockSettings(localOffset, realOffset, multiplier);
         public void Dispose() => _settings.Dispose();
 
-        public override string ToString() 
+        public override string ToString()
             => $"{GetType().Name}({Settings.LocalOffset} + {Settings.Multiplier} * (t - {Settings.RealOffset}))";
-        
+
         // Operations
 
         DateTimeOffset ISystemClock.UtcNow => Now;
-        DateTimeOffset Microsoft.Extensions.Internal.ISystemClock.UtcNow => Now;
         public Moment Now => ToLocalTime(SystemClock.Now);
 
         public Moment ToRealTime(Moment localTime) => Settings.ToRealTime(localTime);
@@ -43,7 +42,7 @@ namespace Stl.Time.Testing
         public TimeSpan ToRealDuration(TimeSpan localDuration) => Settings.ToLocalDuration(localDuration);
         public TimeSpan ToLocalDuration(TimeSpan realDuration) => Settings.ToRealDuration(realDuration);
 
-        public async Task DelayAsync(TimeSpan dueIn, CancellationToken cancellationToken = default) 
+        public async Task DelayAsync(TimeSpan dueIn, CancellationToken cancellationToken = default)
         {
             var isInfinite = dueIn == Timeout.InfiniteTimeSpan;
             if (dueIn < TimeSpan.Zero && !isInfinite)

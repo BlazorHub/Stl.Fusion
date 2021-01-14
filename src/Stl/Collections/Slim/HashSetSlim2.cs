@@ -4,18 +4,18 @@ using System.Runtime.CompilerServices;
 
 namespace Stl.Collections.Slim
 {
-    public struct HashSetSlim2<T>
+    public struct HashSetSlim2<T> : IHashSetSlim<T>
         where T : notnull
     {
         private int _count;
         private (T, T) _tuple;
         private HashSet<T>? _set;
-        
+
         private bool HasSet {
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
             get => _set != null;
         }
-        
+
         public int Count {
             get {
                 if (HasSet) return _set!.Count;
@@ -34,7 +34,7 @@ namespace Stl.Collections.Slim
         public bool Add(T item)
         {
             if (HasSet) return _set!.Add(item);
-            
+
             // Item 1
             if (_count < 1) {
                 _tuple.Item1 = item;
@@ -62,7 +62,7 @@ namespace Stl.Collections.Slim
         public bool Remove(T item)
         {
             if (HasSet) return _set!.Remove(item);
-            
+
             // Item 1
             if (_count < 1) return false;
             if (EqualityComparer<T>.Default.Equals(_tuple.Item1, item)) {
@@ -102,7 +102,7 @@ namespace Stl.Collections.Slim
                 yield return _tuple.Item2;
             }
         }
-        
+
         public void Apply<TState>(TState state, Action<TState, T> action)
         {
             if (HasSet) {
@@ -115,7 +115,7 @@ namespace Stl.Collections.Slim
             if (_count < 2) return;
             action(state, _tuple.Item2);
         }
-        
+
         public void Aggregate<TState>(ref TState state, Aggregator<TState, T> aggregator)
         {
             if (HasSet) {
@@ -127,6 +127,20 @@ namespace Stl.Collections.Slim
             aggregator(ref state, _tuple.Item1);
             if (_count < 2) return;
             aggregator(ref state, _tuple.Item2);
+        }
+
+        public TState Aggregate<TState>(TState state, Func<TState, T, TState> aggregator)
+        {
+            if (HasSet) {
+                foreach (var item in _set!)
+                    state = aggregator(state, item);
+                return state;
+            }
+            if (_count < 1) return state;
+            state = aggregator(state, _tuple.Item1);
+            if (_count < 2) return state;
+            state = aggregator(state, _tuple.Item2);
+            return state;
         }
 
         public void CopyTo(Span<T> target)

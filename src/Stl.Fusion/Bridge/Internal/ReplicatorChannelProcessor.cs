@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
+using System.Reactive;
 using System.Reflection;
 using System.Threading;
 using System.Threading.Channels;
@@ -18,27 +19,27 @@ namespace Stl.Fusion.Bridge.Internal
 {
     public class ReplicatorChannelProcessor : AsyncProcessBase
     {
-        protected static readonly HandlerProvider<(ReplicatorChannelProcessor, CancellationToken), Task> OnStateChangeMessageAsyncHandlers =
-            new HandlerProvider<(ReplicatorChannelProcessor, CancellationToken), Task>(typeof(UpdatedMessageHandler<>));
+        protected static readonly HandlerProvider<(ReplicatorChannelProcessor, CancellationToken), Task> OnStateMessageAsyncHandlers =
+            new(typeof(StateMessageHandler<>));
 
-        protected class UpdatedMessageHandler<T> : HandlerProvider<(ReplicatorChannelProcessor, CancellationToken), Task>.IHandler<T>
+        protected class StateMessageHandler<T> : HandlerProvider<(ReplicatorChannelProcessor, CancellationToken), Task>.IHandler<T>
         {
-            public Task Handle(object target, (ReplicatorChannelProcessor, CancellationToken) arg) 
-                => arg.Item1.OnStateChangedMessageAsync((PublicationStateChangedMessage<T>) target, arg.Item2);
+            public Task Handle(object target, (ReplicatorChannelProcessor, CancellationToken) arg)
+                => arg.Item1.OnStateMessageAsync((PublicationStateMessage<T>) target, arg.Item2);
         }
 
         protected readonly ILogger Log;
         protected readonly IReplicatorImpl ReplicatorImpl;
         protected readonly HashSet<Symbol> Subscriptions;
-        protected volatile Task<Channel<Message>> ChannelTask = null!;
-        protected volatile Channel<Message> SendChannel = null!;
-        protected volatile Exception? LastError;
+        protected volatile Task<Channel<BridgeMessage>> ChannelTask = null!;
+        protected volatile Channel<BridgeMessage> SendChannel = null!;
         protected Symbol ClientId => Replicator.Id;
+        // ReSharper disable once InconsistentlySynchronizedField
         protected object Lock => Subscriptions;
 
         public readonly IReplicator Replicator;
         public readonly Symbol PublisherId;
-        public SimpleComputedInput<bool> StateComputed;
+        public readonly IMutableState<bool> IsConnected;
 
         public ReplicatorChannelProcessor(IReplicator replicator, Symbol publisherId, ILogger? log = null)
         {
@@ -47,17 +48,8 @@ namespace Stl.Fusion.Bridge.Internal
             ReplicatorImpl = (IReplicatorImpl) replicator;
             PublisherId = publisherId;
             Subscriptions = new HashSet<Symbol>();
-            StateComputed = ((SimpleComputed<bool>) SimpleComputed.New<bool>(
-                ComputedOptions.NoAutoInvalidateOnError, 
-                (c, ct) => {
-                    lock (Lock) {
-                        var lastError = LastError;
-                        if (lastError != null)
-                            return Task.FromException<bool>(lastError);
-                        return Task.FromResult(ChannelTask.IsCompleted);
-                    }
-                }))
-                .Input;
+            var stateFactory = ReplicatorImpl.Services.GetStateFactory();
+            IsConnected = stateFactory.NewMutable(Result.Value(true));
             // ReSharper disable once VirtualMemberCallInConstructor
             Reconnect();
         }
@@ -65,8 +57,8 @@ namespace Stl.Fusion.Bridge.Internal
         protected override async Task RunInternalAsync(CancellationToken cancellationToken)
         {
             try {
-                var lastChannelTask = (Task<Channel<Message>>?) null;
-                var channel = (Channel<Message>) null!;
+                var lastChannelTask = (Task<Channel<BridgeMessage>>?) null;
+                var channel = (Channel<BridgeMessage>) null!;
                 while (true) {
                     var error = (Exception?) null;
                     try {
@@ -98,7 +90,8 @@ namespace Stl.Fusion.Bridge.Internal
                         Reconnect(error);
                         var ct = cancellationToken.IsCancellationRequested ? cancellationToken : default;
                         foreach (var publicationId in GetSubscriptions()) {
-                            var replicaImpl = (IReplicaImpl?) Replicator.TryGet(publicationId);
+                            var publicationRef = new PublicationRef(PublisherId, publicationId);
+                            var replicaImpl = (IReplicaImpl?) Replicator.TryGet(publicationRef);
                             replicaImpl?.ApplyFailedUpdate(error, ct);
                         }
                         break;
@@ -116,11 +109,16 @@ namespace Stl.Fusion.Bridge.Internal
         public virtual void Subscribe(IReplica replica)
         {
             // No checks, since they're done by the only caller of this method
+            var publicationId = replica.PublicationRef.PublicationId;
+            var computed = replica.Computed;
+            var isConsistent = computed.IsConsistent();
             lock (Lock) {
-                Subscriptions.Add(replica.PublicationId);
+                Subscriptions.Add(publicationId);
                 Send(new SubscribeMessage() {
                     PublisherId = PublisherId,
-                    PublicationId = replica.PublicationId,
+                    PublicationId = publicationId,
+                    Version = computed.Version,
+                    IsConsistent = isConsistent,
                     IsUpdateRequested = replica.IsUpdateRequested,
                 });
             }
@@ -129,11 +127,12 @@ namespace Stl.Fusion.Bridge.Internal
         public virtual void Unsubscribe(IReplica replica)
         {
             // No checks, since they're done by the only caller of this method
+            var publicationId = replica.PublicationRef.PublicationId;
             lock (Lock) {
-                Subscriptions.Remove(replica.PublicationId);
+                Subscriptions.Remove(publicationId);
                 Send(new UnsubscribeMessage() {
                     PublisherId = PublisherId,
-                    PublicationId = replica.PublicationId,
+                    PublicationId = publicationId,
                 });
             }
         }
@@ -145,43 +144,49 @@ namespace Stl.Fusion.Bridge.Internal
             }
         }
 
-        protected virtual Task OnMessageAsync(Message message, CancellationToken cancellationToken)
+        protected virtual Task OnMessageAsync(BridgeMessage message, CancellationToken cancellationToken)
         {
             switch (message) {
-            case PublicationStateChangedMessage scm:
-                // Fast dispatch to OnUpdatedMessageAsync<T> 
-                return OnStateChangeMessageAsyncHandlers[scm.GetResultType()].Handle(scm, (this, cancellationToken));
+            case PublicationStateMessage psm:
+                // Fast dispatch to OnUpdatedMessageAsync<T>
+                return OnStateMessageAsyncHandlers[psm.GetResultType()].Handle(psm, (this, cancellationToken));
             case PublicationAbsentsMessage pam:
-                var replica = (IReplicaImpl?) Replicator.TryGet(pam.PublicationId);
+                var replica = (IReplicaImpl?) Replicator.TryGet((PublisherId, pam.PublicationId));
                 replica?.ApplyFailedUpdate(Errors.PublicationAbsents(), default);
                 break;
             }
             return Task.CompletedTask;
         }
 
-        protected virtual Task OnStateChangedMessageAsync<T>(PublicationStateChangedMessage<T> message, CancellationToken cancellationToken)
+        protected virtual Task OnStateMessageAsync<T>(PublicationStateMessage<T> message, CancellationToken cancellationToken)
         {
-            var lTaggedOutput = new LTagged<Result<T>>(message.Output, message.NewLTag);
-            var replica = Replicator.GetOrAdd(message.PublisherId, message.PublicationId, lTaggedOutput);
-            if (!(replica is IReplicaImpl<T> replicaImpl))
-                // Weird case: somehow replica is of different type
-                return Task.CompletedTask; 
+            // Debug.WriteLine($"#{message.MessageIndex} -> {message.Version}, {message.IsConsistent}, {message.Output.HasValue}");
+            var psi = new PublicationStateInfo<T>(
+                new PublicationRef(message.PublisherId, message.PublicationId),
+                message.Version, message.IsConsistent,
+                message.Output.GetValueOrDefault());
 
-            replicaImpl.ApplySuccessfulUpdate(lTaggedOutput, message.NewIsConsistent);
+            var replica = Replicator.GetOrAdd(psi);
+            var replicaImpl = (IReplicaImpl<T>) replica;
+            replicaImpl.ApplySuccessfulUpdate(message.Output, psi.Version, psi.IsConsistent);
             return Task.CompletedTask;
         }
 
         protected virtual void Reconnect(Exception? error = null)
         {
+            if (error != null)
+                IsConnected.Error = error;
+            else
+                IsConnected.Value = false;
+
             var sendChannel = CreateSendChannel();
-            var channelTaskSource = TaskSource.New<Channel<Message>>(true);
+            var channelTaskSource = TaskSource.New<Channel<BridgeMessage>>(true);
             var channelTask = channelTaskSource.Task;
 
-            Channel<Message> oldSendChannel;
+            Channel<BridgeMessage> oldSendChannel;
             lock (Lock) {
                 oldSendChannel = Interlocked.Exchange(ref SendChannel, sendChannel);
                 Interlocked.Exchange(ref ChannelTask, channelTask);
-                Interlocked.Exchange(ref LastError, error);
             }
             try {
                 oldSendChannel?.Writer.TryComplete();
@@ -189,7 +194,6 @@ namespace Stl.Fusion.Bridge.Internal
             catch {
                 // It's better to suppress all exceptions here
             }
-            StateComputed.Computed.Invalidate();
 
             // Connect task
             var connectTask = Task.Run(async () => {
@@ -199,16 +203,17 @@ namespace Stl.Fusion.Bridge.Internal
                     await Task.Delay(ReplicatorImpl.ReconnectDelay, cancellationToken).ConfigureAwait(false);
                     Log.LogInformation($"{ClientId}: Reconnecting...");
                 }
-                else 
+                else
                     Log.LogInformation($"{ClientId}: Connecting...");
 
                 var channelProvider = ReplicatorImpl.ChannelProvider;
                 var channel = await channelProvider
                     .CreateChannelAsync(PublisherId, cancellationToken)
                     .ConfigureAwait(false);
-            
+
                 foreach (var publicationId in GetSubscriptions()) {
-                    var replica = Replicator.TryGet(publicationId);
+                    var publicationRef = new PublicationRef(PublisherId, publicationId);
+                    var replica = Replicator.TryGet(publicationRef);
                     if (replica != null)
                         Subscribe(replica);
                     else {
@@ -222,13 +227,8 @@ namespace Stl.Fusion.Bridge.Internal
             });
             connectTask.ContinueWith(ct => {
                 channelTaskSource.SetFromTask(ct);
-                if (!ct.IsCompletedSuccessfully)
-                    // LastError will be updated anyway in this case
-                    return; 
-                lock (Lock) {
-                    Interlocked.Exchange(ref LastError, null);
-                }
-                StateComputed.Computed.Invalidate();
+                if (ct.IsCompletedSuccessfully)
+                    IsConnected.Value = true;
             });
 
             // Copy task
@@ -236,7 +236,7 @@ namespace Stl.Fusion.Bridge.Internal
                 var cancellationToken = CancellationToken.None;
                 try {
                     var sendChannelReader = sendChannel.Reader;
-                    var channel = (Channel<Message>?) null;
+                    var channel = (Channel<BridgeMessage>?) null;
                     while (await sendChannelReader.WaitToReadAsync(cancellationToken).ConfigureAwait(false)) {
                         if (sendChannel != SendChannel)
                             break;
@@ -252,17 +252,19 @@ namespace Stl.Fusion.Bridge.Internal
             });
         }
 
-        protected virtual Channel<Message> CreateSendChannel() 
-            => Channel.CreateUnbounded<Message>(
+        protected virtual Channel<BridgeMessage> CreateSendChannel()
+            => Channel.CreateUnbounded<BridgeMessage>(
                 new UnboundedChannelOptions() {
                     AllowSynchronousContinuations = true,
                     SingleReader = true,
                     SingleWriter = false,
                 });
 
-        protected void Send(Message message)
+        protected void Send(BridgeMessage message)
         {
-            SendChannel.Writer.WriteAsync(message); 
+            if (message is ReplicatorMessage rm)
+                rm.ReplicatorId = Replicator.Id;
+            SendChannel.Writer.WriteAsync(message);
         }
     }
 }

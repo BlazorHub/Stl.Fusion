@@ -15,9 +15,12 @@ namespace Stl.Fusion.Bridge
         IReplica IReplicaComputed.Replica => Input.Replica;
         public IReplica<T> Replica => (IReplica<T>) Input.Replica;
 
-        public ReplicaComputed(ComputedOptions options, ReplicaInput input, LTag lTag) 
-            : base(options, input, lTag) { }
-        public ReplicaComputed(ComputedOptions options, ReplicaInput input, Result<T> output, LTag lTag, bool isConsistent = true) 
-            : base(options, input, output, lTag, isConsistent) { }
+        protected ReplicaComputed(ComputedOptions options, ReplicaInput input, LTag version)
+            : base(options, input, version)
+        { }
+
+        public ReplicaComputed(ComputedOptions options, ReplicaInput input, Result<T> output, LTag version, bool isConsistent)
+            : base(options, input, output, version, isConsistent)
+        { }
     }
 }

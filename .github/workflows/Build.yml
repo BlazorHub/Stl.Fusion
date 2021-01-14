@@ -25,22 +25,21 @@ jobs:
       - name: Setup .NET Core
         uses: actions/setup-dotnet@v1
         with:
-          dotnet-version: 3.1.301
+          dotnet-version: 5.0.100
 
       - name: Restore NuGet Packages & Tools
-        run: dotnet run --project build --configuration Release --no-launch-profile -- --configuration Debug restore restore-tools
+        run: dotnet run -p build -c Release --no-launch-profile -- restore restore-tools
 
       - name: Build
-        run: dotnet run --project build --configuration Release --no-launch-profile -- --configuration Debug build
+        run: dotnet run -p build -c Release --no-launch-profile -- --configuration Debug --framework net5.0 build
 
       - name: Run tests
-        run: dotnet run --project build --configuration Release --no-launch-profile -- --configuration Debug coverage
-        #run: timeout 10m dotnet test artifacts/tests/Stl.Tests.dll
+        run: dotnet run -p build -c Release --no-launch-profile -- --configuration Debug --framework net5.0 coverage
 
       - name: Codecov
-        uses: codecov/codecov-action@v1.0.7
+        uses: codecov/codecov-action@v1.0.13
         with:
           name: codecov-bot
-          file: "artifacts/tests/output/coverage.cobertura.xml"
+          file: artifacts/tests/output/*.xml
           flags: unit
-          fail_ci_if_error: true
+          # fail_ci_if_error: true

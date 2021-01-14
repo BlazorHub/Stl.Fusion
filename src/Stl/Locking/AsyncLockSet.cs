@@ -22,8 +22,8 @@ namespace Stl.Locking
     public class AsyncLockSet<TKey> : IAsyncLockSet<TKey>
         where TKey : notnull
     {
-        public static int DefaultConcurrencyLevel => HardwareInfo.ProcessorCount;
-        public static readonly int DefaultCapacity = 509;
+        public static int DefaultConcurrencyLevel => HardwareInfo.GetProcessorCountFactor();
+        public static int DefaultCapacity => OSInfo.IsWebAssembly ? 31 : 509;
 
         private readonly ConcurrentDictionary<TKey, Entry> _entries;
         private readonly ConcurrentPool<AsyncLock> _lockPool;
@@ -33,11 +33,11 @@ namespace Stl.Locking
         public int AcquiredLockCount => _entries.Count;
 
         public AsyncLockSet(
-            TaskCreationOptions taskCreationOptions = TaskCreationOptions.RunContinuationsAsynchronously) 
+            TaskCreationOptions taskCreationOptions = TaskCreationOptions.RunContinuationsAsynchronously)
             : this(ReentryMode.CheckedFail, taskCreationOptions) { }
         public AsyncLockSet(
             ReentryMode reentryMode,
-            TaskCreationOptions taskCreationOptions = TaskCreationOptions.RunContinuationsAsynchronously) 
+            TaskCreationOptions taskCreationOptions = TaskCreationOptions.RunContinuationsAsynchronously)
             : this(reentryMode, taskCreationOptions, DefaultConcurrencyLevel, DefaultCapacity) { }
         public AsyncLockSet(
             ReentryMode reentryMode,
@@ -55,7 +55,7 @@ namespace Stl.Locking
         {
             if (_entries.TryGetValue(key, out var entry))
                 return false;
-            return entry.AsyncLock?.IsLocked ?? false;
+            return entry?.AsyncLock?.IsLocked ?? false;
         }
 
         public bool? IsLockedLocally(TKey key)
@@ -64,7 +64,7 @@ namespace Stl.Locking
                 return null;
             if (_entries.TryGetValue(key, out var entry))
                 return false;
-            return entry.AsyncLock?.IsLockedLocally;
+            return entry!.AsyncLock?.IsLockedLocally;
         }
 
         ValueTask<IDisposable> IAsyncLockSet<TKey>.LockAsync(
@@ -127,6 +127,7 @@ namespace Stl.Locking
         {
             try {
                 var releaser = await task.ConfigureAwait(false);
+                // ReSharper disable once HeapView.BoxingAllocation
                 return new Releaser(entry, releaser);
             }
             catch {
@@ -181,7 +182,7 @@ namespace Stl.Locking
 
         public struct Releaser : IDisposable
         {
-            private readonly Entry _entry; 
+            private readonly Entry _entry;
             private AsyncLock.Releaser _asyncLockReleaser;
 
             public Releaser(object entry, AsyncLock.Releaser asyncLockReleaser)

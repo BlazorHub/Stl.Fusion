@@ -11,20 +11,21 @@
     <PackageTags>servicetitan stl</PackageTags>
     <Description>A part of ServiceTitan Library.</Description>
     <NoLogo>true</NoLogo>
+    <SuppressNETCoreSdkPreviewMessage>true</SuppressNETCoreSdkPreviewMessage>
     <!--
     <ApplicationIcon>$(MSBuildThisFileDirectory)\docs\img\Logo128.jpg</ApplicationIcon>
     -->
-    <PackageIconUrl>https://github.com/servicetitan/Stl/master/docs/img/Logo128.jpg</PackageIconUrl>
+    <PackageIconUrl>https://github.com/servicetitan/Stl.Fusion/master/docs/img/Logo128.jpg</PackageIconUrl>
     <GenerateDocumentationFile>false</GenerateDocumentationFile>
     <NoPackageAnalysis>false</NoPackageAnalysis>
-    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <AppendTargetFrameworkToOutputPath>true</AppendTargetFrameworkToOutputPath>
     <AppendRuntimeIdentifierToOutputPath>false</AppendRuntimeIdentifierToOutputPath>
     <OutputPath>$(SolutionDir)artifacts\</OutputPath>
     <PackageOutputPath>$(SolutionDir)artifacts\nupkg</PackageOutputPath>
     <DefaultLanguage>en-US</DefaultLanguage>
     <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
-    <!-- embedded not recommended yet for libs and nupkg, track this in https://github.com/dotnet/sdk/issues/2679 -->
-    <!-- also embedded doesn't work with dotnet pack without nuspec or IncludeBuildOutput = false -->
+    <!-- Embedded not recommended yet for libs and nupkg, track this in https://github.com/dotnet/sdk/issues/2679 -->
+    <!-- Also embedded doesn't work with dotnet pack without nuspec or IncludeBuildOutput = false -->
     <DebugType>portable</DebugType>
     <DebugSymbols>true</DebugSymbols>
     <GenerateFullPaths Condition="'$(TERM_PROGRAM)' == 'vscode'">true</GenerateFullPaths>
@@ -50,7 +51,9 @@
     <ContinuousIntegrationBuild>false</ContinuousIntegrationBuild>
     <PathMap>'$(SolutionDir)'=/_/</PathMap>
   </PropertyGroup>
+
   <ItemGroup Condition="$(DeterministicSourcePaths) == 'true'">
-    <SourceRoot Include="$(MSBuildThisFileDirectory)/" />
+    <SourceRoot Include="$(SolutionDir)" />
   </ItemGroup>
+
 </Project>

@@ -1,5 +1,6 @@
 using System;
 using FluentAssertions;
+using Stl.Collections;
 using Stl.Testing;
 using Stl.Time;
 using Xunit;
@@ -24,7 +25,7 @@ namespace Stl.Tests.Time
             var e = Event.New("Test", m);
             var (e1, json) = e.PassThroughAllSerializersWithOutput();
             Out.WriteLine(e.ToString());
-            Out.WriteLine(json);
+            Out.WriteLine(json.ToDelimitedString(Environment.NewLine));
             e1.Should().Equals(e);
         }
 
@@ -32,14 +33,34 @@ namespace Stl.Tests.Time
         public void UtcHandlingTest()
         {
             var epsilon = TimeSpan.FromSeconds(1);
-            
+
             var now1 = (Moment) DateTime.UtcNow;
             var now2 = (Moment) DateTime.Now;
             Math.Abs((now1 - now2).Ticks).Should().BeLessThan(epsilon.Ticks);
-            
+
             now1 = DateTimeOffset.UtcNow;
             now2 = DateTimeOffset.Now;
             Math.Abs((now1 - now2).Ticks).Should().BeLessThan(epsilon.Ticks);
+        }
+
+        [Fact]
+        public void ClampTest()
+        {
+            var m = new Moment(DateTime.Now);
+            m.Clamp(m, m).Should().Be(m);
+            m.Clamp(m + TimeSpan.FromSeconds(1), DateTime.MaxValue)
+                .Should().Be(m + TimeSpan.FromSeconds(1));
+            m.Clamp(DateTime.MinValue, m - TimeSpan.FromSeconds(1))
+                .Should().Be(m - TimeSpan.FromSeconds(1));
+
+            m = Moment.MinValue;
+            m.ToDateTimeClamped().Should().Be(DateTime.MinValue.ToUniversalTime());
+            m.ToDateTimeOffsetClamped().Should().Be(DateTimeOffset.MinValue.ToUniversalTime());
+            m.ToString().Should().Be(new Moment(DateTime.MinValue).ToString());
+            m = Moment.MaxValue;
+            m.ToDateTimeClamped().Should().Be(DateTime.MaxValue.ToUniversalTime());
+            m.ToDateTimeOffsetClamped().Should().Be(DateTimeOffset.MaxValue.ToUniversalTime());
+            m.ToString().Should().Be(new Moment(DateTimeOffset.MaxValue).ToString());
         }
     }
 }

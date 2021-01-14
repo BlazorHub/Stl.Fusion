@@ -1,11 +1,12 @@
 using System.Linq;
+using System.Text;
 using FluentAssertions;
 using Stl.Testing;
 using Stl.Text;
 using Xunit;
 using Xunit.Abstractions;
 
-namespace Stl.Tests.Text 
+namespace Stl.Tests.Text
 {
     public class ListFormatTest : TestBase
     {
@@ -23,11 +24,11 @@ namespace Stl.Tests.Text
         {
             expectedFormat ??= format;
 
-            var parser = ListFormat.Default.CreateParser(format);
+            var parser = ListFormat.Default.CreateParser(format, new StringBuilder());
             var list = parser.ParseAll().ToList();
             list.Count.Should().Be(length);
 
-            var formatter = ListFormat.Default.CreateFormatter();
+            var formatter = ListFormat.Default.CreateFormatter(new StringBuilder());
             formatter.Append(list);
             formatter.Output.Should().Be(expectedFormat);
         }

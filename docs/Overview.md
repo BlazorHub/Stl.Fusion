@@ -1,72 +1,86 @@
-# Stl.Fusion: Overview  
+# Fusion Overview  
 
 ## What is "Real-time User Interface"?
 
 > It is the UI displaying always up-to-date content, which 
 gets updated even if user doesn't take actions. 
 
-The UI update loop of a regular (non-real-time) UI looks as follows:
+Let's look at seemingly unrelated problem first: 
+**caching with real-time entry invalidation**. 
+A pseudo-code solving this problem for a specific computation
+would look as follows:
+
 ```cs
-// React+Redux - style update loop 
-while (true) {
-    var action = await GetUserAction();
-    (localState, cachedServerState) = 
-        await ApplyAction(localState, cachedServerState)
-    var uiState = CreateUIState(localState, serverState);
-    UpdateUI(uiState);   
+var key = (nameof(ComputeValueFor), arg1, arg2, arg3, ...);
+for (;;) {
+    var observableValue = await ComputeAsync(arg1, arg2, arg2, ...);
+    await cache.SetAsync(key, observableValue.Value);
+    await observableValue.ChangedAsync();
+    await cache.Evict(key);
+}
+```
+
+Now, think `observableValue` is either HTML or some other markup
+defining either a whole UI or its fragment. If it is similarly capable
+of signaling when it gets changed (or when it likely gets changed),
+your real-time UI update logic could look as follows:
+
+```cs
+for (;;) {
+    var observableMarkup = await ComputeMarkupAsync(arg1, arg2, arg2, ...);
+    Render(observableMarkup);
+    await observableValue.ChangedAsync();
 }
 ```  
 
-And this is how a similar loop looks for a real-time UI:
-```cs
-while (true) {
-    var localStateChangedTask = localState.ChangedAsync(); 
-    var cachedServerStateChangedTask = cachedServerState.ChangedAsync();
-    var completedTask = await Task.WhenAny(
-        localStateChangedTask,
-        cachedServerStateChangedTask);
-    if (completedTask == localStateChangedTask)
-        localState = await localState.UpdateAsync();
-    else
-        cachedServerState = await cachedServerState.UpdateAsync();
-    var uiState = CreateUIState(localState, cachedServerState);
-    UpdateUI(uiState);   
-}
-```  
+There is a broad range of problems which could be solved nicely
+with an abstraction allowing you to write functions, which, like
+`async` functions, return a wrapper over their true output that
+later signals when the output (for the same set of arguments) 
+is going to change.
 
-The key part there is `.ChangedAsync()` function,
-which is supposed to asynchronously complete once changes happen. 
-It's easy to write it for the `localState`, but what about the
-`cachedServerState`? It's actually pretty hard, assuming that:
-* `cachedServerState` is a small part of "full" server-side state
-  that client caches (stores locally)
-* We don't want to get too many of false positives - e.g. we don't
-  want to send a change notification to every client once any change
-  on server happens, because this means our servers will be sending 
-  `O(userCount^2)` of such notifications per any interval, i.e.
-  it won't scale.
+So if we compare this with `async` functions, the difference is:
+* Async function returns `Task<T>`, which allows to asynchronously
+  await for the completion of a computation - in other words,
+  subscribe for ~ `Completed` event. Once you've got this event,
+  you can access task's `Result` and `Exception` properties.
+* Our new functions should return `IComputed<T>`, which similarly
+  allows to access `Value` and `Error` (and you don't have to
+  await to get these), but also allows to asynchronously await 
+  for the moment when call to the same function would produce
+  `IComputed<T>`, which `(Value, Error)` pair would differ from the
+  ones you have.
 
-Now let's look at a seemingly different problem: caching with 
-real-time entry invalidation driven by changes in the underlying data:
+Ultimately, this is exactly what Fusion brings - 
+an abstraction for `IComputed<T>` and a way to write functions
+returning these [Computed Values]. 
 
-```cs
-var observableState = FunctionReturningObservableState();
-await cache.SetAsync(key, observableState.Value);
-await observableState.ChangedAsync(); // <-- LOOK AT THIS LINE 
-await cache.Evict(key);
-```  
+Surprisingly, Fusion doesn't require you to both "wrap" and "unwrap" 
+these `IComputed<T>` "boxes" everywhere - soon you'll learn that
+methods of [Compute Services] are implicitly "backed" by `IComputed<T>` 
+boxes behind the scenes, even though their return type stays the same.
+It looks like a violation of "explicit is better than implicit" principle, 
+but hopefully you'll recognize is exactly the case when an exception 
+just proves the rule is right, because it's all about the readability:
+* Nearly all [Compute Service] methods are supposed to be asynchronous, 
+  and seeing `Task<IComputed<Whatever>>` instead of `Task<Whatever>` 
+  everywhere is already painful.
+* But unwrapping such outputs with 
+  `var value = (await GetSomethingAsync(...).ConfigureAwait(false)).Value`
+  is even more painful, assuming you usually have more than one call
+  site for every method you write.
 
-As you see, it's a very similar problem:
-you may look at any UI (its state or model) as a value 
-cached remotely on the client. 
-And if you want to update it in real time, your actually 
-want to "invalidate" this value once the data it 
-depends on changes &ndash; as quickly as possible. 
-The code on the client may react to the invalidation by 
-either immediate or delayed update request.
+And even more importantly, Fusion also automatically tracks dependencies
+between [Computed Values] produced by [Compute Services], so once
+any of them gets invalidated, it ensures all of the values dependent
+on it are invalidated too. This feature saves a tremendous amount
+of time, because in fact, **Fusion requires you to manually invalidate
+just the values produced from external (non Fusion-based) data sources**;
+the rest gets invalidated automatically.
 
-So since both these problems are connected, let's try to
-solve them together. But first, let's talk about caching.
+But before we dig deeper, let's learn how all of this is related to 
+*eventual consistency* - more precisely, how this approach dramatically
+improves the most important property of any eventually consistent system.
 
 ## Caching, Invalidation, and Eventual Consistency
 
@@ -188,11 +202,11 @@ IComputed<DateTime> GetCurrentTimeWithOffset(TimeSpan offset) {
 }  
 ```
 
-`IComputed<T>` we return here is defined as follows:
+[`IComputed<T>`] we return here is defined as:
 ```cs
 interface IComputed<T> {
+    ConsistencyState ConsistencyState { get; } // Computing -> Consistent -> Invalidated
     T Value { get; }
-    bool IsConsistent { get; }
     Action Invalidated; // Event, triggered just once on invalidation
 
     void Invalidate();
@@ -338,11 +352,11 @@ But first, let's look at some...
 
 That's how real Fusion-based code of `GetTimeWithOffsetAsync` looks like:
 ```cs
-public class TimeService : IComputedService
+public class TimeService
 {
     ...
 
-    [ComputedServiceMethod]
+    [ComputeMethod]
     public virtual async Task<DateTime> GetTimeWithOffsetAsync(TimeSpan offset)
     {
         var time = await GetTimeAsync(); // Yes, it supports async calls too
@@ -351,23 +365,21 @@ public class TimeService : IComputedService
 }
 ```
 
-As you see, it's almost exactly the code you saw, but with the following differences:
-* The class implements `IComputedService` - a tagging interface with no members. 
-  "Computed service" in the content below refers to such types.
-* The method is decorated with [ComputedServiceMethod] - the attribute is required
+As you see, it's almost exactly the code you saw, but with a single difference:
+* The method is decorated with `[ComputeMethod]` - the attribute is required
   mainly to enable some safety checks, though it also allows to configure the
-  options of computed instances provided for this method.    
+  options for `IComputed<T>` instances backing this method.    
 
 In any other sense it works nearly as it was described earlier.
 
-Now let's get back to manual invalidation. The code below is taken from 
+Let's get back to manual invalidation. The code below is taken from 
 `ChatService.cs` in Fusion samples; everything related to `CancellationToken` 
 and all `.ConfigureAwait(false)` calls are removed for readability (that's
 ~ the same boilerplate code as in any other .NET async logic), but the rest 
 is untouched.
 
 ```cs
-// Notice this is a regular method, not a computed service method
+// Notice this is a regular method, not a compute service method
 public async Task<ChatUser> CreateUserAsync(string name)
 {
     // The real-life code should do this a bit differently
@@ -388,17 +400,17 @@ public async Task<ChatUser> CreateUserAsync(string name)
 ```
 
 As you see, it's fairly simple - you use `Computed.Invalidate(...)`
-to capture and invalidate the result of another computed service method.
+to capture and invalidate the result of another compute service method.
 
 I guess you anticipate there are some cases when it's hard to precisely 
 pinpoint what to invalidate. Yes, there are, and here is a bit trickier
 example:
 ```cs
 // The code from ChatService.cs from Stl.Samples.Blazor.Server.
-[ComputedServiceMethod]
+[ComputeMethod]
 public virtual async Task<ChatPage> GetChatTailAsync(int length)
 {
-    using var dbContext = CreateDbContext();
+    using var dbContext = GetDbContext();
 
     // The same code as usual
     var messages = dbContext.Messages.OrderByDescending(m => m.Id).Take(length).ToList();
@@ -415,7 +427,7 @@ public virtual async Task<ChatPage> GetChatTailAsync(int length)
     return new ChatPage(messages, userById);
 }
 
-[ComputedServiceMethod]
+[ComputeMethod]
 protected virtual async Task<Unit> EveryChatTail() => default;
 
 ```
@@ -429,7 +441,7 @@ with different `length` values?
 
 > Q: Why fetching users in parallel is ok here?
 
-A: `GetUserAsync()` is also a computed service method, which means its
+A: `GetUserAsync()` is also a compute service method, which means its
 results are cached. So in a real-life chat app these calls aren't expected
 to be resolved via DB - most of these users should be already cached,
 which means these calls won't hit the DB and will complete synchronously.
@@ -486,20 +498,27 @@ look prohibitively high. If you need a real-time UI anyway, or a robust
 caching tier with real-time invalidation, the approach shown here might 
 be the best option.
 
-Oh, and there are other benefits. Let's look at another gem:
+If we switch to Fusion terms, you've just learned about:
+* [Compute Services] - services allowed to have Compute Methods.
+  Such methods are decorated with `[ComputeMethod]` attribute and
+  are provided with ...
+* [`IComputed<T>] AKA [Computed Values] behind the scenes.
+  
+There are a few more interesting concepts though, and [Replica Services]
+is the next important one:
 
-## Distributed Computed Services
+## Distributed Compute Services
 
 First, notice that nothing prevents us from crafting this "kind" of `IComputed<T>`:
 ```cs
 public class ReplicaComputed<T> : IComputed<T> {
+    ConsistencyState ConsistencyState { get; } // Computing -> Consistent -> Invalidated
     T Value { get; }
-    bool IsConsistent { get; }
     Action Invalidated;
     
     public ReplicaComputed<T>(IComputed<T> source) {
         Value = source.Value;
-        IsConsistent = source.IsConsistent;
+        ConsistencyState = source.ConsistencyState;
         source.Invalidated += () => Invalidate();
     } 
 
@@ -507,7 +526,7 @@ public class ReplicaComputed<T> : IComputed<T> {
 }
 ```
 
-As you see, it does nothing but "replicates" the source's behaviour. Doesn't seem
+As you see, it does nothing but "replicates" the source's behavior. Doesn't seem
 quite useful, right? But what about remote replicas? What if we implement something
 allowing to publish a computed instance on server side, which will let clients
 to create its remote replicas, and these remote replicas will support all the same
@@ -518,8 +537,8 @@ I described. Speaking about the updates - let's add one more useful method
 to our `IComputed<T>`:
 ```cs
 interface IComputed<T> {
+    ConsistencyState ConsistencyState { get; }
     T Value { get; }
-    bool IsConsistent { get; }
     Action Invalidated; 
     
     void Invalidate();
@@ -594,7 +613,7 @@ All of this means that if you write your controllers like this, you get both a
 "normal" server-side API, and an API that supports Fusion publication mechanism
 almost for free!
 
-The proof: if you open Fusion samples and go to http://localhost:5000/swagger/ page,
+The proof: if you open Fusion samples and go to http://localhost:5005/swagger/ page,
 you'll see this:
 
 ![](img/SwaggerDoc.jpg)
@@ -627,69 +646,69 @@ sample:
     in runtime and "wraps" it once more to intercept everything 
     related to its replicas. 
     ```cs
-    [Header(FusionHeaders.RequestPublication, "1")]
-    public interface ITimeClient : IReplicaService
+    // typeof(ITimeService) on the next line tells the type Fusion exposes it as
+    [RestEaseReplicaService(typeof(ITimeService))] 
+    [BasePath("time")]
+    public interface ITimeClient : IRestEaseReplicaClient
     {
         [Get("get")]
         Task<DateTime> GetTimeAsync(CancellationToken cancellationToken = default);
     }
     ```
 
-2.  And this is, in fact, an auto-updating client-side model.
-    ```cs
-    public class ServerTimeState
-    {
-        public DateTime? Time { get; set; }
-    
-        public class Updater : ILiveStateUpdater<ServerTimeState>
-        {
-            protected ITimeClient Client { get; }
-    
-            public Updater(ITimeClient client) => Client = client;
-    
-            public virtual async Task<ServerTimeState> UpdateAsync(
-                ILiveState<ServerTimeState> liveState, CancellationToken cancellationToken)
-            {
-                var time = await Client.GetTimeAsync(cancellationToken);
-                return new ServerTimeState() { Time = time };
-            }
-        }
+2.  And this is auto-updating UI component using this service:
+    ```razor
+    @page "/serverTime"
+    @using System.Threading
+    @inherits LiveComponentBase<DateTime>
+    @inject ITimeService TimeService
+
+    @{
+        var time = State.LastValue.Format();
+        var error = State.Error;
+    }
+
+    <h1>Server Time</h1>
+
+    <p>Server Time: @time</p>
+
+    @if (error != null) {
+        <div class="alert alert-warning" role="alert">
+            Update error: @error.Message
+        </div>
+    }
+
+    <button class="btn btn-primary" @onclick="() => State.Invalidate(true)">Refresh</button>
+
+    @code {
+        protected override Task<DateTime> ComputeStateAsync(CancellationToken cancellationToken)
+            => TimeService.GetTimeAsync(cancellationToken);
     }
     ```  
 
-The last piece of code doesn't look as nice as everything you saw earlier,
-but that's mostly due to the fact client-side models require a  bit of special 
-handling - e.g. they shouldn't re-throw exceptions on communication or 
-server-side errors. That's why all of them implement `ILiveState` "protocol". 
-We'll cover this part later, but for now let's focus on the code inside 
-`UpdateAsync`: 
-* As you see, it looks like it calls server-side `GetTimeAsync` per every
-  update it intends to make (note that `Client` here is of `ITimeClient` type).
-* But as you know, `ITimeClient` isn't a usual RestEase client - it's a 
-  Fusion-tweaked version of it that supports replicas. So in reality, 
-  such services call server-side HTTP endpoint only when the replica 
-  corresponding to the arguments isn't already available in cache.
-  If a replica is available, but inconsistent, it will be automatically
-  updated via WebSocket channel first, but ultimately, the caller 
-  will get its most up-to-date version (more precisely, its `.Value`).
-* "Cache" above refers to a local cache where all the consisntent instances
-  of `IComputed<T>` are registered. It's not exactly the cache - i.e. its 
-  actual purpose is a bit different (Tutorial explains this), but for simplicity
-  let's call it cache here.
+This component inherits from `LiveComponentBase<T>`, which ensures
+it has `State` property (a [Live State]) and all the logic needed to recompute it
+once it changes; 
+[here you can read more about this](https://github.com/servicetitan/Stl.Fusion/blob/master/README.md#enough-talk-show-me-the-code).
 
-Do `IReplicaService`s differ from `IComputedService`? Yes and no:
-* Yes, because they are automatically implemented
-* No, because they behave as any other `IComputedService` - in sense that
-  you can "consume" the values they produce in other computed services,
-  and all the invalidation chains will just work.
+The feature allowing to replicate [Compute Service] on the client is called
+[Replica Services]. Do such services differ from compute services? Yes and no:
+* Yes, because they are implemented automatically
+* No, because they behave almost exactly as a [Compute Service] they mimic, 
+  so in particular, you can "consume" the values they produce in other 
+  [Compute Services], and all the invalidation chains will just work.
   
-The "Composition" sample is actually designed to prove this: 
-it "composes" its model by two different ways: 
-* One model is [composed on the server side](https://github.com/servicetitan/Stl/blob/master/samples/Stl.Samples.Blazor.Server/Services/ServerSideComposerService.cs);
-  its replica is published to all the clients
-* And another model is [composed completely on the client](https://github.com/servicetitan/Stl/blob/master/samples/Stl.Samples.Blazor.Client/Services/ClientSideComposerService.cs) 
-  by combining other server-side replicas.
-* **The surprising part:** open two above links side-by-side & spot the difference.
+![](img/Stl-Fusion-Chat-Sample.gif)
+
+"Composition" sample (shown in a bottom-right window) proves exactly this. 
+It "composes" its own model by two different ways: 
+* First panel's UI model is 
+  [composed on the server-side](https://github.com/servicetitan/Stl.Fusion.Samples/blob/master/src/Blazor/Server/Services/ComposerService.cs);
+  its client-side replica is bound to the component displaying the panel
+* The second panel uses an UI model
+  [composed completely on the client](https://github.com/servicetitan/Stl.Fusion.Samples/blob/master/src/Blazor/Client/Services/LocalComposerService.cs) 
+  by combining server-side replicas of all the values used there.
+* **The surprising part:** two above files are almost identical!
 
 That's why Fusion is a nearly...
 
@@ -744,7 +763,7 @@ replicas query its most current state.
 
 Besides that, you don't have to think of concepts like "topics" or 
 "subscriptions" - whatever you consume from a client automatically gets
-the updates, and if it's something shared amoung multiple clients,
+the updates, and if it's something shared among multiple clients,
 you may thing of this as a "topic".
 
 Of course I don't mean SignalR is absolutely useless with Fusion - 
@@ -753,21 +772,24 @@ if you really want to deliver the update as quickly as possible,
 SignalR could be a better choice: currently there is no way to tell Fusion
 to push the update together with invalidation message, so any update
 requires a explicit round-trip after the invalidation. Later
-you will learn why this is behaviour is actually quite reasonable,
+you will learn why this is behavior is actually quite reasonable,
 but nevertheless, there are cases when this could be a deal breaker.
 We consider addressing this particular scenario in future, but
 even if this is done, there always be other cases and reasons
 to prefer X over Fusion. It can't be a silver bullet, even though
 it tries really hard to be the one :)
 
-### Fusion and Blazor = ❤
+P.S. Check out ["How similar is Fusion to SignalR?"](https://medium.com/@alexyakunin/how-similar-is-stl-fusion-to-signalr-e751c14b70c3?source=friends_link&sk=241d5293494e352f3db338d93c352249) if you want to learn more about 
+the similarities and differences.
+
+### Fusion + Blazor = ❤
 
 Why every single piece of a client-side code shown here is supposed to run on 
 [Blazor](https://dotnet.microsoft.com/apps/aspnet/web-apps/blazor)? 
 
 ![](img/Blazor.jpg)
 
-Stl.Fusion is just 3 months old project (that's on Jul 9, 2020). 
+Fusion is just 5 months old project (that's on Oct 1, 2020). 
 In human terms she shouldn't even start to crawl yet :) 
 And so far it's a one-man creation - more an MVP vs a finished product.
 As you might guess, 3 months for all of this + samples, documentation,
@@ -812,11 +834,14 @@ Let me list a few things about Blazor that impressed me the most:
     running on Fusion client (it's ~ exactly the same logic that is
     running on server, i.e. all these runtime-generated proxies, 
     argument capturing, caching, etc.)
-  * The option to switch to server-side Blazor is definitely a
-    valuable one. Moreover, you can target both modes with a tiny bit 
-    of extra work - isn't this amazing?
-  * Finally, 
-    [AOT compilation for Blazor is expected with .NET 5](https://visualstudiomagazine.com/articles/2020/05/22/blazor-future.aspx).
+  * The option to use Server-Side Blazor is super valuable as well -
+    likely, this is going to be the primary option for the next year.
+    And do you know that Fusion allows you to target both modes 
+    with just a tiny bit of extra work? Check out its Blazor samples,
+    the index page allows you to switch between these two modes.
+  * Finally, AOT compilation for Blazor is expected somewhere in 
+    ~ 1 year timeframe, which should make Blazor WebAssembly much more
+    attractive.
   
 Besides that, I think Blazor is a very good long-term bet - 
 especially for the companies running their server-side code on .NET Core (or .NET).
@@ -837,11 +862,23 @@ especially for the companies running their server-side code on .NET Core (or .NE
 
 ### Next Steps
 
-* Check out the [Tutorial](tutorial/README.md)
-  or go to [Documentation Home](README.md)
-* Join our [Discord Server](https://discord.gg/EKEwv6d) 
-  to ask questions and track project updates.
-* Check out [Q/A](QA.md) to get answers to some frequent questions.
-* If you read this document but still don't understand it,
-  check out [Stl.Fusion In Simple Terms](https://medium.com/@alexyakunin/stl-fusion-in-simple-terms-65b1975967ab?source=friends_link&sk=04e73e75a52768cf7c3330744a9b1e38).
-  
+* Check out the [Tutorial] or go to [Documentation Home]
+* Join our [Discord Server] or [Gitter] to ask questions and track project updates.
+
+
+[Compute Services]: https://github.com/servicetitan/Stl.Fusion.Samples/blob/master/docs/tutorial/Part01.md
+[Compute Service]: https://github.com/servicetitan/Stl.Fusion.Samples/blob/master/docs/tutorial/Part01.md
+[`IComputed<T>`]: https://github.com/servicetitan/Stl.Fusion.Samples/blob/master/docs/tutorial/Part02.md
+[Computed Value]: https://github.com/servicetitan/Stl.Fusion.Samples/blob/master/docs/tutorial/Part02.md
+[Live State]: https://github.com/servicetitan/Stl.Fusion.Samples/blob/master/docs/tutorial/Part03.md
+[Replica Services]: https://github.com/servicetitan/Stl.Fusion.Samples/blob/master/docs/tutorial/Part04.md
+
+[Documentation Home]: README.md
+[Q/A]: QA.md
+[Samples]: https://github.com/servicetitan/Stl.Fusion.Samples
+[Tutorial]: https://github.com/servicetitan/Stl.Fusion.Samples/blob/master/docs/tutorial/README.md
+[Fusion In Simple Terms]: https://medium.com/@alexyakunin/stl-fusion-in-simple-terms-65b1975967ab?source=friends_link&sk=04e73e75a52768cf7c3330744a9b1e38
+
+[Gitter]: https://gitter.im/Stl-Fusion/community
+[Discord Server]: https://discord.gg/EKEwv6d
+[Fusion Feedback Form]: https://forms.gle/TpGkmTZttukhDMRB6

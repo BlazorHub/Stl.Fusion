@@ -9,13 +9,14 @@ namespace Stl.Async
     {
         CancellationToken StopToken { get; }
         Task? RunningTask { get; }
-        Task RunAsync(); 
+        Task RunAsync();
     }
 
     public abstract class AsyncProcessBase : AsyncDisposableBase, IAsyncProcess
     {
         private object Lock => StopTokenSource;
         protected CancellationTokenSource StopTokenSource { get; }
+        protected bool FlowExecutionContext { get; set; }
         public CancellationToken StopToken { get; }
         public Task? RunningTask { get; private set; }
 
@@ -33,9 +34,15 @@ namespace Stl.Async
                 if (RunningTask != null)
                     return RunningTask;
                 ThrowIfDisposedOrDisposing();
-                RunningTask = Task
-                    .Run(() => RunInternalAsync(StopToken), CancellationToken.None)
-                    .SuppressCancellation();
+
+                var flowSuppressor =
+                    (FlowExecutionContext && !ExecutionContext.IsFlowSuppressed())
+                    ? Disposable.NewClosed(ExecutionContext.SuppressFlow(), d => d.Dispose())
+                    : Disposable.NewClosed<AsyncFlowControl>(default, _ => {});
+                using (flowSuppressor)
+                    RunningTask = Task
+                        .Run(() => RunInternalAsync(StopToken), CancellationToken.None)
+                        .SuppressCancellation();
             }
             return RunningTask;
         }
@@ -48,7 +55,7 @@ namespace Stl.Async
             return Task.CompletedTask;
         }
 
-        public async Task StopAsync(CancellationToken cancellationToken) 
+        public async Task StopAsync(CancellationToken cancellationToken)
             => await DisposeAsync();
 
         protected override async ValueTask DisposeInternalAsync(bool disposing)

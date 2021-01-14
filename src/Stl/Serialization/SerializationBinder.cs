@@ -13,17 +13,17 @@ namespace Stl.Serialization
     {
         public static readonly ISerializationBinder Instance = new SerializationBinder();
 
-        private readonly ConcurrentDictionary<(string? AssemblyName, string TypeName), Type> _cache;
-        private readonly Func<(string?, string), Type> _resolveTypeHandler;
+        private readonly ConcurrentDictionary<(string? AssemblyName, string TypeName), Type?> _cache;
+        private readonly Func<(string?, string), Type?> _resolveTypeHandler;
 
         public SerializationBinder()
         {
             _resolveTypeHandler = ResolveType;
-            _cache = new ConcurrentDictionary<(string?, string), Type>();
+            _cache = new ConcurrentDictionary<(string?, string), Type?>();
         }
 
-        public Type BindToType(string? assemblyName, string typeName) 
-            => GetType(assemblyName, typeName);
+        public Type BindToType(string? assemblyName, string typeName)
+            => GetType(assemblyName, typeName) ?? throw new KeyNotFoundException();
 
         public void BindToName(Type serializedType, out string? assemblyName, out string? typeName)
         {
@@ -33,10 +33,10 @@ namespace Stl.Serialization
 
         // Protected part
 
-        protected Type GetType(string? assemblyName, string typeName) 
+        protected Type? GetType(string? assemblyName, string typeName)
             => _cache.GetOrAddChecked((assemblyName, typeName), _resolveTypeHandler);
 
-        protected virtual Type ResolveType((string? AssemblyName, string TypeName) key)
+        protected virtual Type? ResolveType((string? AssemblyName, string TypeName) key)
         {
             var (assemblyName, typeName) = key;
 
@@ -72,7 +72,7 @@ namespace Stl.Serialization
             string genericTypeDefName = typeName.Substring(0, openBracketIndex);
             if (openBracketIndex < 0)
                 return null;
-            
+
             var genericTypeDef = assembly.GetType(genericTypeDefName);
             if (genericTypeDef == null)
                 return null;
@@ -95,8 +95,9 @@ namespace Stl.Serialization
                         string typeArgAssemblyQualifiedName = typeName.Substring(
                             typeArgStartIndex, i - typeArgStartIndex);
                         TypeNameHelpers.SplitAssemblyQualifiedName(typeArgAssemblyQualifiedName,
-                            out var typeArgAssemblyName, out var typeArgTypeName); 
-                        genericTypeArguments.Add(GetType(typeArgAssemblyName, typeArgTypeName));
+                            out var typeArgAssemblyName, out var typeArgTypeName);
+                        var type = GetType(typeArgAssemblyName, typeArgTypeName) ?? throw new KeyNotFoundException();
+                        genericTypeArguments.Add(type);
                     }
                     break;
                 }

@@ -2,16 +2,17 @@ using System;
 using System.Collections.Concurrent;
 using System.Runtime.InteropServices;
 using System.Threading;
+using Stl.DependencyInjection;
 
 namespace Stl.Concurrency
 {
     public class GCHandlePool : IDisposable
     {
-        public class Options
+        public record Options
         {
-            public int Capacity { get; set; } = 1024;
-            public GCHandleType HandleType { get; set; } = GCHandleType.Weak;
-            public StochasticCounter OperationCounter { get; set; } = new StochasticCounter();
+            public int Capacity { get; init; } = 1024;
+            public GCHandleType HandleType { get; init; } = GCHandleType.Weak;
+            public StochasticCounter OperationCounter { get; init; } = new();
         }
 
         private readonly ConcurrentQueue<GCHandle> _queue;
@@ -28,7 +29,7 @@ namespace Stl.Concurrency
         public GCHandlePool(GCHandleType handleType) : this(new Options() { HandleType = handleType }) { }
         public GCHandlePool(Options? options = null)
         {
-            options ??= new Options();
+            options ??= new();
             _queue = new ConcurrentQueue<GCHandle>();
             _opCounter = options.OperationCounter;
             HandleType = options.HandleType;

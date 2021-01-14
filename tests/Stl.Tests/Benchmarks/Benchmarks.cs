@@ -34,13 +34,6 @@ namespace Stl.Tests.Benchmarks
                 }
                 return sum;
             });
-            RunOne("Read CoarseCpuClock.Now.EpochOffsetTicks", baseOpCount, opCount => {
-                var sum = 0L;
-                for (; opCount > 0; opCount--) {
-                    sum += CoarseCpuClock.Now.EpochOffsetTicks;
-                }
-                return sum;
-            });
             RunOne("Read CoarseStopwatch.ElapsedTicks", baseOpCount, opCount => {
                 var sum = 0L;
                 for (; opCount > 0; opCount--) {
@@ -48,8 +41,29 @@ namespace Stl.Tests.Benchmarks
                 }
                 return sum;
             });
+            RunOne("Read CoarseStopwatch.NowEpochOffsetTicks", baseOpCount, opCount => {
+                var sum = 0L;
+                for (; opCount > 0; opCount--) {
+                    sum += CoarseStopwatch.NowEpochOffsetTicks;
+                }
+                return sum;
+            });
+            RunOne("Read CoarseCpuClock.Now.EpochOffsetTicks", baseOpCount, opCount => {
+                var sum = 0L;
+                for (; opCount > 0; opCount--) {
+                    sum += CoarseCpuClock.Now.EpochOffsetTicks;
+                }
+                return sum;
+            });
+            RunOne("Read Environment.TickCount64", baseOpCount, opCount => {
+                var sum = 0L;
+                for (; opCount > 0; opCount--) {
+                    sum += Environment.TickCount64;
+                }
+                return sum;
+            });
             RunOne("Read DateTime.Now.Ticks", baseOpCount, opCount => {
-                
+
                 var sum = 0L;
                 for (; opCount > 0; opCount--) {
                     sum += DateTime.Now.Ticks;
@@ -58,6 +72,7 @@ namespace Stl.Tests.Benchmarks
             });
         }
 
+        // [Fact]
         [Fact(Skip = "Performance")]
         public void RunBenchmarks()
         {

@@ -1,63 +1,68 @@
 ﻿using System;
-using System.Reflection;
-using Microsoft.AspNetCore.Components;
-using Stl.Frozen;
-using Stl.Fusion.UI;
+using System.Threading;
+using System.Threading.Tasks;
+using Stl.Async;
+using Stl.Internal;
 
 namespace Stl.Fusion.Blazor
 {
-    public abstract class LiveComponentBase<TState> : ComponentBase, IDisposable
+    public abstract class LiveComponentBase<T> : StatefulComponentBase<ILiveState<T>>
     {
-        [Inject]
-        protected ILiveState<TState> LiveState { get; set; } = null!;
-        protected TState State => LiveState.Value;
-        protected IUpdateDelayer UpdateDelayer => LiveState.UpdateDelayer;
+        protected override ILiveState<T> CreateState()
+            => StateFactory.NewLive<T>(ConfigureState, async (_, ct) => {
+                // Default CreateState synchronizes ComputeStateAsync call
+                // as per https://github.com/servicetitan/Stl.Fusion/issues/202
+                // You can override it to implement a version w/o sync.
+                var ts = TaskSource.New<T>(false);
+                await InvokeAsync(async () => {
+                    try {
+                        ts.TrySetResult(await ComputeStateAsync(ct));
+                    }
+                    catch (OperationCanceledException) {
+                        ts.TrySetCanceled();
+                    }
+                    catch (Exception e) {
+                        ts.TrySetException(e);
+                    }
+                });
+                return await ts.Task.ConfigureAwait(false);
+            }, this);
 
-        public virtual void Dispose() 
-            => LiveState.Dispose();
-
-        public void Invalidate(bool updateImmediately = true) 
-            => LiveState.Invalidate(updateImmediately);
-
-        protected override void OnInitialized() 
-            => LiveState.Updated += OnLiveStateUpdated;
-
-        protected virtual void OnLiveStateUpdated(ILiveState liveState) 
-            => StateHasChanged();
+        protected virtual void ConfigureState(LiveState<T>.Options options) { }
+        protected abstract Task<T> ComputeStateAsync(CancellationToken cancellationToken);
     }
 
-    public abstract class LiveComponentBase<TLocal, TState> : LiveComponentBase<TState>
+    public abstract class LiveComponentBase<T, TLocals> : LiveComponentBase<T>
     {
-        protected TLocal Local {
-            get => LiveState.Local;
-            set => LiveState.Local = value;
-        }
+        private IMutableState<TLocals>? _locals;
 
-        protected new ILiveState<TLocal, TState> LiveState {
-            get => (ILiveState<TLocal, TState>) base.LiveState;
-            set => base.LiveState = value;
-        }
-
-        protected virtual void UpdateLocal(Action<TLocal> updater)
-        {
-            var clone = CloneLocal(Local);
-            updater.Invoke(clone);
-            if (Local is IFrozen f)
-                f.Freeze();
-            Local = clone;
-        }
-
-        protected virtual TLocal CloneLocal(TLocal source)
-        {
-            switch (source) {
-            case IFrozen f:
-                return (TLocal) f.CloneToUnfrozen(true);
-            default:
-                var memberwiseCloneMethod = typeof(object).GetMethod(
-                    nameof(MemberwiseClone), 
-                    BindingFlags.Instance | BindingFlags.NonPublic);
-                return (TLocal) memberwiseCloneMethod.Invoke(source, Array.Empty<object>());
+        protected IMutableState<TLocals> Locals {
+            get => _locals!;
+            set {
+                if (value == null)
+                    throw new ArgumentNullException(nameof(value));
+                if (_locals == value)
+                    return;
+                if (_locals != null)
+                    throw Errors.AlreadyInitialized(nameof(State));
+                _locals = value;
             }
         }
+
+        protected override void OnInitialized()
+        {
+            // ReSharper disable once ConstantNullCoalescingCondition
+            Locals ??= CreateLocals();
+            Locals.Updated += (s, e) => {
+                State.Invalidate();
+                State.CancelUpdateDelay();
+            };
+            base.OnInitialized();
+        }
+
+        protected virtual IMutableState<TLocals> CreateLocals()
+            => StateFactory.NewMutable(ConfigureLocals, Option<Result<TLocals>>.None);
+
+        protected virtual void ConfigureLocals(MutableState<TLocals>.Options options) { }
     }
 }

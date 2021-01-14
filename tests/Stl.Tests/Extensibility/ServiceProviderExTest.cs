@@ -1,7 +1,7 @@
 using System;
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
-using Stl.Extensibility;
+using Stl.DependencyInjection;
 using Stl.Testing;
 using Xunit;
 using Xunit.Abstractions;
@@ -70,8 +70,12 @@ namespace Stl.Tests.Extensibility
             b.Y.Should().BeEmpty();
 
             ((Action) (() => {
-                var c = services.Activate<C>(); 
+                var c = services.Activate<C>();
             })).Should().Throw<InvalidOperationException>();
+
+            var c = services.Activate<C>(1, 2);
+            c.X.Should().Be("1");
+            c.Y.Should().Be("2");
         }
     }
 }

@@ -1,0 +1,65 @@
+@using Microsoft.AspNetCore.Components.Authorization
+@using Microsoft.JSInterop
+@using Stl.Async
+@using Stl.Fusion.Authentication
+@using Stl.OS
+@implements IDisposable
+@inject ISessionProvider SessionProvider
+@inject AuthStateProvider AuthStateProvider
+@inject PresenceService PresenceService
+@inject NavigationManager Navigator
+@inject IJSRuntime JSRuntime
+
+<CascadingAuthenticationState>
+    <CascadingValue TValue="Task<AuthState>" Value="@GetAuthStateAsync()" ChildContent="@ChildContent"/>
+</CascadingAuthenticationState>
+
+@code {
+    [Parameter]
+    public RenderFragment ChildContent { get; set; } = _ => { };
+    [Parameter]
+    public string SessionIdJavaScriptExpression { get; set; } = "window.FusionAuth.sessionId";
+    [Parameter]
+    public string SessionId {
+        get => SessionProvider.HasSession ? SessionProvider.Session.Id : "";
+        set {
+            if (SessionProvider.HasSession || string.IsNullOrEmpty(value))
+                return;
+            SessionProvider.Session = new Session(value);
+        }
+    }
+    [Parameter]
+    public bool StartPresenceService { get; set; } = true;
+
+    protected override void OnInitialized()
+    {
+        if (SessionId == "" && OSInfo.IsWebAssembly) {
+            var inProcessJSRuntime = (IJSInProcessRuntime) JSRuntime;
+            SessionId = inProcessJSRuntime.Invoke<string>("eval", SessionIdJavaScriptExpression);
+        }
+        if (StartPresenceService)
+            Task.Run(() => PresenceService.StartAsync(default)).Ignore();
+        AuthStateProvider.AuthenticationStateChanged += OnAuthenticationStateChanged;
+        OnAuthenticationStateChanged(AuthStateProvider.GetAuthenticationStateAsync());
+    }
+
+    void IDisposable.Dispose()
+        => AuthStateProvider.AuthenticationStateChanged -= OnAuthenticationStateChanged;
+
+    private void OnAuthenticationStateChanged(Task<AuthenticationState> newAuthStateTask)
+    {
+        newAuthStateTask.ContinueWith(t => {
+            if (!t.IsCompletedSuccessfully)
+                return; // Will react to the next change
+            var authState = (AuthState) t.Result;
+            if (!authState.IsSignOutForced)
+                return;
+            // Current Session is unusable due to forced sign-out.
+            // The only way to get an usable one is to reload the page.
+            InvokeAsync(() => Navigator.NavigateTo(Navigator.Uri, true)).Ignore();
+        }).Ignore();
+    }
+
+    private Task<AuthState> GetAuthStateAsync()
+        => AuthStateProvider.GetAuthenticationStateAsync().ContinueWith(t => (AuthState) t.Result);
+}

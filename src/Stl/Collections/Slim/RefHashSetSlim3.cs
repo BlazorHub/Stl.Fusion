@@ -4,17 +4,17 @@ using System.Runtime.CompilerServices;
 
 namespace Stl.Collections.Slim
 {
-    public struct RefHashSetSlim3<T>
+    public struct RefHashSetSlim3<T> : IRefHashSetSlim<T>
         where T : class
     {
-        private (T, T, T) _tuple;
+        private (T?, T?, T?) _tuple;
         private HashSet<T>? _set;
-        
+
         private bool HasSet {
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
             get => _set != null;
         }
-        
+
         public int Count {
             get {
                 if (HasSet) return _set!.Count;
@@ -29,7 +29,7 @@ namespace Stl.Collections.Slim
         {
             if (item == null)
                 throw new ArgumentNullException(nameof(item));
-            
+
             if (HasSet) return _set!.Contains(item);
             if (_tuple.Item1 == item) return true;
             if (_tuple.Item2 == item) return true;
@@ -41,9 +41,9 @@ namespace Stl.Collections.Slim
         {
             if (item == null)
                 throw new ArgumentNullException(nameof(item));
-            
+
             if (HasSet) return _set!.Add(item);
-            
+
             // Item 1
             if (_tuple.Item1 == null) {
                 _tuple.Item1 = item;
@@ -64,8 +64,8 @@ namespace Stl.Collections.Slim
                 return true;
             }
             if (_tuple.Item3 == item) return false;
-            
-            _set = new HashSet<T>(ReferenceEqualityComparer<T>.Default) {
+
+            _set = new HashSet<T>(ReferenceEqualityComparer<T>.Instance) {
                 _tuple.Item1, _tuple.Item2, _tuple.Item3, item
             };
             _tuple = default;
@@ -76,9 +76,9 @@ namespace Stl.Collections.Slim
         {
             if (item == null)
                 throw new ArgumentNullException(nameof(item));
-            
+
             if (HasSet) return _set!.Remove(item);
-            
+
             // Item 1
             if (_tuple.Item1 == null) return false;
             if (_tuple.Item1 == item) {
@@ -124,7 +124,7 @@ namespace Stl.Collections.Slim
                 yield return _tuple.Item3;
             }
         }
-        
+
         public void Apply<TState>(TState state, Action<TState, T> action)
         {
             if (HasSet) {
@@ -139,7 +139,7 @@ namespace Stl.Collections.Slim
             if (_tuple.Item3 == null) return;
             action(state, _tuple.Item3);
         }
-        
+
         public void Aggregate<TState>(ref TState state, Aggregator<TState, T> aggregator)
         {
             if (HasSet) {
@@ -154,20 +154,21 @@ namespace Stl.Collections.Slim
             if (_tuple.Item3 == null) return;
             aggregator(ref state, _tuple.Item3);
         }
-        
-        public void Aggregate<TState>(TState state, Func<TState, T, TState> aggregator)
+
+        public TState Aggregate<TState>(TState state, Func<TState, T, TState> aggregator)
         {
             if (HasSet) {
                 foreach (var item in _set!)
                     state = aggregator(state, item);
-                return;
+                return state;
             }
-            if (_tuple.Item1 == null) return;
+            if (_tuple.Item1 == null) return state;
             state = aggregator(state, _tuple.Item1);
-            if (_tuple.Item2 == null) return;
+            if (_tuple.Item2 == null) return state;
             state = aggregator(state, _tuple.Item2);
-            if (_tuple.Item3 == null) return;
+            if (_tuple.Item3 == null) return state;
             state = aggregator(state, _tuple.Item3);
+            return state;
         }
 
         public void CopyTo(Span<T> target)

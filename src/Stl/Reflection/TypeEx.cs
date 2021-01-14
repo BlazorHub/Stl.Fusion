@@ -13,19 +13,17 @@ namespace Stl.Reflection
     {
         public static readonly string SymbolPrefix = "@";
 
-        private static readonly Regex MethodNameRe = new Regex("[^\\w\\d]+", RegexOptions.Compiled);
-        private static readonly Regex MethodNameTailRe = new Regex("_+$", RegexOptions.Compiled);
-        private static readonly Regex GenericMethodNameTailRe = new Regex("_\\d+$", RegexOptions.Compiled);
-        private static readonly ConcurrentDictionary<(Type, bool, bool), Symbol> ToIdentifierNameCache =
-            new ConcurrentDictionary<(Type, bool, bool), Symbol>();
-        private static readonly ConcurrentDictionary<Type, Symbol> ToSymbolCache =
-            new ConcurrentDictionary<Type, Symbol>();
+        private static readonly Regex MethodNameRe = new("[^\\w\\d]+", RegexOptions.Compiled);
+        private static readonly Regex MethodNameTailRe = new("_+$", RegexOptions.Compiled);
+        private static readonly Regex GenericMethodNameTailRe = new("_\\d+$", RegexOptions.Compiled);
+        private static readonly ConcurrentDictionary<(Type, bool, bool), Symbol> ToIdentifierNameCache = new();
+        private static readonly ConcurrentDictionary<Type, Symbol> ToSymbolCache = new();
 
         public static IEnumerable<Type> GetAllBaseTypes(this Type type, bool addSelf = false, bool addInterfaces = false)
         {
             if (type == null)
                 throw new ArgumentNullException(nameof(type));
-            
+
             if (addSelf)
                 yield return type;
             var baseType = type.BaseType;
@@ -33,8 +31,8 @@ namespace Stl.Reflection
                 yield break; // type == typeof(Object)
 
             while (baseType != typeof(object)) {
-                yield return baseType;
-                baseType = baseType.BaseType;
+                yield return baseType!;
+                baseType = baseType!.BaseType;
             }
             if (addInterfaces) {
                 var interfaces = type.GetInterfaces();
@@ -59,7 +57,7 @@ namespace Stl.Reflection
             if (castTo.IsInterface || castFrom.IsInterface)
                 // Not super obvious, but true
                 return true;
-            
+
             // Both types are classes, so the cast may succeed
             // only if one of them is a base of another
             return castTo.IsAssignableFrom(castFrom) || castFrom.IsAssignableFrom(castTo);
@@ -78,13 +76,13 @@ namespace Stl.Reflection
                         .Select(t => t.ToIdentifierName(useFullArgumentNames1, useFullArgumentNames1));
                     name = string.Join('_', EnumerableEx.One(name).Concat(argumentNames));
                 }
-                name = MethodNameRe.Replace(name, "_");
+                name = MethodNameRe.Replace(name!, "_");
                 name = MethodNameTailRe.Replace(name, "");
                 return name;
             });
         }
 
-        public static Symbol ToSymbol(this Type type, bool withPrefix = true) 
+        public static Symbol ToSymbol(this Type type, bool withPrefix = true)
             => withPrefix
                 ? ToSymbolCache.GetOrAddChecked(type, type1 =>
                     new Symbol(SymbolPrefix + type1.ToIdentifierName(true, true)))

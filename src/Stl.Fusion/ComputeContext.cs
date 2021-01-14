@@ -1,4 +1,3 @@
-using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using System.Threading;
 
@@ -6,61 +5,70 @@ namespace Stl.Fusion
 {
     public class ComputeContext
     {
-        internal static readonly AsyncLocal<ComputeContext?> CurrentLocal = new AsyncLocal<ComputeContext?>();
-        private static readonly Dictionary<CallOptions, ComputeContext> ContextCache;
-        private volatile IComputed? _capturedComputed;
+        private static readonly ComputeContext[] ContextCache;
+        private static readonly AsyncLocal<ComputeContext?> CurrentLocal = new();
+        internal volatile IComputed? CapturedComputed;
         private volatile int _isUsed;
-        
+
+        internal static readonly ComputeContext Invalidate;
         public static readonly ComputeContext Default;
+        public static ComputeContext Current {
+            get => CurrentLocal.Value ?? Default;
+            internal set {
+                if (value == Default)
+                    value = null!;
+                CurrentLocal.Value = value;
+            }
+        }
 
         public CallOptions CallOptions { get; }
         protected bool IsDisposed { get; set; }
         protected bool IsUsed => _isUsed != 0;
 
-        public static ComputeContext New(CallOptions options)
+        internal static ComputeContext New(CallOptions options)
         {
             var canUseCache = (options & CallOptions.Capture) == 0;
-            var context = canUseCache 
-                ? ContextCache[options] 
-                : new ComputeContext(options); 
+            var context = canUseCache
+                ? ContextCache[(int) options]
+                : new ComputeContext(options);
             return context;
         }
 
         static ComputeContext()
         {
-            var allCallOptions = CallOptions.TryGetCached |  CallOptions.Invalidate;
-            var cache = new Dictionary<CallOptions, ComputeContext>();
+            var allCallOptions = CallOptions.TryGetExisting |  CallOptions.Invalidate;
+            var cache = new ComputeContext[1 + (int) allCallOptions];
             for (var i = 0; i <= (int) allCallOptions; i++) {
                 var action = (CallOptions) i;
-                cache[action] = new CachedComputeContext(action);
+                cache[i] = new CachedComputeContext(action);
             }
             ContextCache = cache;
             Default = New(default);
+            Invalidate = New(CallOptions.Invalidate);
         }
 
-        protected ComputeContext(CallOptions callOptions) 
+        protected ComputeContext(CallOptions callOptions)
             => CallOptions = callOptions;
 
         public override string ToString() => $"{GetType().Name}({CallOptions})";
 
-        public ComputeContextScope Activate() => new ComputeContextScope(this);
+        public ComputeContextScope Activate() => new (this);
+        public static ComputeContextScope Suppress() => new(Default);
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public void TryCaptureValue(IComputed? value)
+        public void TryCapture(IComputed? computed)
         {
-            if (value == null || (CallOptions & CallOptions.Capture) == 0)
+            if (computed == null || (CallOptions & CallOptions.Capture) == 0)
                 return;
-            // We capture the last value
-            Interlocked.Exchange(ref _capturedComputed, value);
-            // Interlocked.CompareExchange(ref _capturedComputed, value, null);
+            Interlocked.CompareExchange(ref CapturedComputed, computed, null);
         }
 
-        public IComputed? GetCapturedComputed() => _capturedComputed;
-        public IComputed<T>? GetCapturedComputed<T>() => (IComputed<T>?) _capturedComputed;
+        public IComputed? GetCapturedComputed() => CapturedComputed;
+        public IComputed<T>? GetCapturedComputed<T>() => (IComputed<T>?) CapturedComputed;
 
-        internal bool TrySetIsUsed() 
+        internal bool Acquire()
             => 0 == Interlocked.CompareExchange(ref _isUsed, 1, 0);
-        internal void ResetIsUsed() 
+        internal void Release()
             => Interlocked.Exchange(ref _isUsed, 0);
     }
 

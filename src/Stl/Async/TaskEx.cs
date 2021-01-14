@@ -1,9 +1,11 @@
 using System;
 using System.Reactive;
+using System.Runtime.CompilerServices;
 using System.Runtime.ExceptionServices;
 using System.Threading;
 using System.Threading.Tasks;
 using Stl.Internal;
+using Stl.Time;
 
 namespace Stl.Async
 {
@@ -25,6 +27,15 @@ namespace Stl.Async
             UnitTaskCompletionSource = unitTcs;
         }
 
+        // Ignore
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static void Ignore(this Task task) { }
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static void Ignore(this ValueTask valueTask) { }
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static void Ignore<T>(this ValueTask<T> valueTask) { }
+
         // ToXxx
 
         public static ValueTask<T> ToValueTask<T>(this Task<T> source) => new ValueTask<T>(source);
@@ -32,44 +43,101 @@ namespace Stl.Async
 
         // WithFakeCancellation
 
-        public static Task<T> WithFakeCancellation<T>(this Task<T> task, 
+        public static Task<T> WithFakeCancellation<T>(
+            this Task<T> task,
             CancellationToken cancellationToken)
         {
             if (cancellationToken == default)
                 return task;
 
             async Task<T> InnerAsync() {
-                var tokenTask = cancellationToken.ToTask<T>(true, task.CreationOptions);
-                var winner = await Task.WhenAny(task, tokenTask);
+                using var dTask = cancellationToken.ToTask<T>(task.CreationOptions);
+                var winner = await Task.WhenAny(task, dTask.Resource).ConfigureAwait(false);
                 return await winner;
             }
 
             return InnerAsync();
-
         }
 
-        public static Task WithFakeCancellation(this Task task, 
+        public static Task WithFakeCancellation(
+            this Task task,
             CancellationToken cancellationToken)
         {
             if (cancellationToken == default)
                 return task;
 
             async Task InnerAsync() {
-                var tokenTask = cancellationToken.ToTask(true, task.CreationOptions);
-                var winner = await Task.WhenAny(task, tokenTask);
+                using var dTask = cancellationToken.ToTask(task.CreationOptions);
+                var winner = await Task.WhenAny(task, dTask.Resource).ConfigureAwait(false);
                 await winner;
             }
 
             return InnerAsync();
         }
-        
+
+        // WithTimeout
+
+        public static Task<bool> WithTimeout(
+            this Task task,
+            TimeSpan timeout,
+            CancellationToken cancellationToken = default)
+            => task.WithTimeout(SystemClock.Instance, timeout, cancellationToken);
+
+        public static async Task<bool> WithTimeout(
+            this Task task,
+            IMomentClock clock,
+            TimeSpan timeout,
+            CancellationToken cancellationToken = default)
+        {
+            Task? completedTask = null;
+            using var cts = new CancellationTokenSource();
+            var ctsToken = cts.Token;
+            await using var _ = cancellationToken.Register(state => ((CancellationTokenSource) state!).Cancel(), cts);
+
+            var delayTask = clock.DelayAsync(timeout, ctsToken);
+            completedTask = await Task.WhenAny(task, delayTask).ConfigureAwait(false);
+
+            if (completedTask != task)
+                return false;
+
+            cts.Cancel(); // Ensures delayTask is cancelled to avoid memory leak
+            return true;
+        }
+
+        public static Task<Option<T>> WithTimeout<T>(
+            this Task<T> task,
+            TimeSpan timeout,
+            CancellationToken cancellationToken = default)
+            => task.WithTimeout(SystemClock.Instance, timeout, cancellationToken);
+
+        public static async Task<Option<T>> WithTimeout<T>(
+            this Task<T> task,
+            IMomentClock clock,
+            TimeSpan timeout,
+            CancellationToken cancellationToken = default)
+        {
+            Task? completedTask = null;
+            using var cts = new CancellationTokenSource();
+            var ctsToken = cts.Token;
+            await using var _ = cancellationToken.Register(state => ((CancellationTokenSource) state!).Cancel(), cts);
+
+            var delayTask = clock.DelayAsync(timeout, ctsToken);
+            completedTask = await Task.WhenAny(task, delayTask).ConfigureAwait(false);
+
+            if (completedTask != task)
+                return Option<T>.None;
+
+            cts.Cancel(); // Ensures delayTask is cancelled to avoid memory leak
+            return await task.ConfigureAwait(false);
+        }
+
         // SuppressXxx
 
-        public static Task SuppressExceptions(this Task task) 
+        public static Task SuppressExceptions(this Task task)
             => task.ContinueWith(t => { });
-        public static Task<T> SuppressExceptions<T>(this Task<T> task) 
+        public static Task<T> SuppressExceptions<T>(this Task<T> task)
             => task.ContinueWith(t => t.IsCompletedSuccessfully ? t.Result : default!);
-        
+
         public static Task SuppressCancellation(this Task task)
             => task.ContinueWith(t => {
                 if (t.IsCompletedSuccessfully || t.IsCanceled)
@@ -149,10 +217,16 @@ namespace Stl.Async
 
         // AssertXxx
 
-        public static Task AssertCompleted(this Task task) 
+        public static Task AssertCompleted(this Task task)
             => !task.IsCompleted ? throw Errors.TaskIsNotCompleted() : task;
-        
-        public static Task<T> AssertCompleted<T>(this Task<T> task) 
+
+        public static Task<T> AssertCompleted<T>(this Task<T> task)
+            => !task.IsCompleted ? throw Errors.TaskIsNotCompleted() : task;
+
+        public static ValueTask AssertCompleted(this ValueTask task)
+            => !task.IsCompleted ? throw Errors.TaskIsNotCompleted() : task;
+
+        public static ValueTask<T> AssertCompleted<T>(this ValueTask<T> task)
             => !task.IsCompleted ? throw Errors.TaskIsNotCompleted() : task;
     }
 }

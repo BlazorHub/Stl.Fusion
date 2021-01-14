@@ -51,7 +51,7 @@ namespace Stl.Async
 
         // WithCancellation
 
-        public static Task<T> WithCancellation<T>(this TaskSource<T> target, 
+        public static Task<T> WithCancellation<T>(this TaskSource<T> target,
             CancellationToken cancellationToken)
         {
             var task = target.Task;
@@ -59,7 +59,7 @@ namespace Stl.Async
                 return task;
             if (cancellationToken != default) {
                 cancellationToken.Register(arg => {
-                    var target1 = (TaskSource<T>) arg;
+                    var target1 = (TaskSource<T>) arg!;
                     target1.TrySetCanceled();
                 }, target);
             }

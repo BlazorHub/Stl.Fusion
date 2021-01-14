@@ -37,7 +37,7 @@ namespace Stl.Testing
                 var hasMoreItems = await reader.WaitToReadAsync(timeoutToken).ConfigureAwait(false);
                 hasMoreItems.Should().BeTrue();
                 reader.TryRead(out var m).Should().BeTrue();
-                return m;
+                return m!;
             }
             catch (OperationCanceledException) {
                 timeoutToken.IsCancellationRequested.Should().BeFalse(
@@ -54,8 +54,8 @@ namespace Stl.Testing
             var timeoutToken = timeoutCts.Token;
             timeoutCts.CancelAfter(timeout.GetValueOrDefault());
 
-            var timeoutTask = timeoutToken.ToTaskSource(false).Task;
-            await Task.WhenAny(reader.Completion, timeoutTask).ConfigureAwait(false);
+            using var dTimeoutTask = timeoutToken.ToTask();
+            await Task.WhenAny(reader.Completion, dTimeoutTask.Resource).ConfigureAwait(false);
             reader.Completion.IsCompleted.Should().BeTrue();
         }
 

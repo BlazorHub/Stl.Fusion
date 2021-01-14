@@ -1,6 +1,8 @@
 using System;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Stl.Channels;
 using Stl.Fusion.Bridge;
 using Stl.Fusion.Bridge.Messages;
@@ -14,29 +16,32 @@ namespace Stl.Fusion.Server
     {
         public class Options
         {
-            private static readonly WebSocketChannelProvider.Options DefaultClientOptions = 
-                new WebSocketChannelProvider.Options();
+            private static readonly WebSocketChannelProvider.Options DefaultClientOptions = new();
 
             public string RequestPath { get; set; } = DefaultClientOptions.RequestPath;
             public string PublisherIdQueryParameterName { get; set; } = DefaultClientOptions.PublisherIdQueryParameterName;
             public string ClientIdQueryParameterName { get; set; } = DefaultClientOptions.ClientIdQueryParameterName;
-            public Func<ChannelSerializerPair<Message, string>> ChannelSerializerPairFactory { get; set; } = 
+            public Func<ChannelSerializerPair<BridgeMessage, string>> ChannelSerializerPairFactory { get; set; } =
                 DefaultChannelSerializerPairFactory;
 
-            public static ChannelSerializerPair<Message, string> DefaultChannelSerializerPairFactory()
-                => new ChannelSerializerPair<Message, string>(
-                    new JsonNetSerializer().ToTyped<Message>(),
-                    new SafeJsonNetSerializer(t => typeof(ReplicatorMessage).IsAssignableFrom(t)).ToTyped<Message>());
+            public static ChannelSerializerPair<BridgeMessage, string> DefaultChannelSerializerPairFactory()
+                => new(
+                    new JsonNetSerializer().ToTyped<BridgeMessage>(),
+                    new SafeJsonNetSerializer(t => typeof(ReplicatorMessage).IsAssignableFrom(t)).ToTyped<BridgeMessage>());
         }
 
-        public string RequestPath { get; }
-        public string PublisherIdQueryParameterName { get; } 
-        public string ClientIdQueryParameterName { get; } 
         protected IPublisher Publisher { get; }
-        protected Func<ChannelSerializerPair<Message, string>> ChannelSerializerPairFactory { get; }
+        protected Func<ChannelSerializerPair<BridgeMessage, string>> ChannelSerializerPairFactory { get; }
+        protected ILogger Log { get; }
 
-        public WebSocketServer(Options options, IPublisher publisher)
+        public string RequestPath { get; }
+        public string PublisherIdQueryParameterName { get; }
+        public string ClientIdQueryParameterName { get; }
+
+        public WebSocketServer(Options? options, IPublisher publisher, ILogger<WebSocketServer>? log = null)
         {
+            options ??= new();
+            Log = log ?? NullLogger<WebSocketServer>.Instance;
             RequestPath = options.RequestPath;
             PublisherIdQueryParameterName = options.PublisherIdQueryParameterName;
             ClientIdQueryParameterName = options.ClientIdQueryParameterName;
@@ -64,7 +69,15 @@ namespace Stl.Fusion.Server
                 .WithSerializers(serializers)
                 .WithId(clientId);
             Publisher.ChannelHub.Attach(channel);
-            await wsChannel.ReaderTask.ConfigureAwait(false);
+            try {
+                await wsChannel.WhenCompletedAsync().ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) {
+                throw;
+            }
+            catch (Exception e) {
+                Log.LogWarning(e, "WebSocket connection was closed with an error.");
+            }
         }
     }
 }

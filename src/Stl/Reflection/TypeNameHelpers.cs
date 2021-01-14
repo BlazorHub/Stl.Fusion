@@ -1,6 +1,7 @@
 using System;
 using System.Text;
 using Newtonsoft.Json.Serialization;
+using Stl.Text;
 
 namespace Stl.Reflection
 {
@@ -10,14 +11,14 @@ namespace Stl.Reflection
         {
             string aqn;
             if (binder == null)
-                aqn = type.AssemblyQualifiedName;
+                aqn = type.AssemblyQualifiedName!;
             else {
                 binder.BindToName(type, out string? assemblyName, out string? typeName);
                 aqn = typeName + (assemblyName == null ? "" : ", " + assemblyName);
             }
             return fullName ? aqn : RemoveAssemblyDetails(aqn);
         }
-        
+
         public static void SplitAssemblyQualifiedName(string fullyQualifiedTypeName, out string? assemblyName, out string typeName)
         {
             var assemblyDelimiterIndex = GetAssemblyDelimiterIndex(fullyQualifiedTypeName);
@@ -28,7 +29,7 @@ namespace Stl.Reflection
                     .ToString();
                 assemblyName = fullyQualifiedTypeName.AsSpan()
                     .Slice(
-                        assemblyDelimiterIndex.GetValueOrDefault() + 1, 
+                        assemblyDelimiterIndex.GetValueOrDefault() + 1,
                         fullyQualifiedTypeName.Length - assemblyDelimiterIndex.GetValueOrDefault() - 1)
                     .Trim()
                     .ToString();
@@ -41,7 +42,7 @@ namespace Stl.Reflection
 
         private static string RemoveAssemblyDetails(string fullyQualifiedTypeName)
         {
-            var sb = new StringBuilder();
+            var sb = StringBuilderEx.Acquire(0x20);
             var writingAssemblyName = false;
             var skipping = false;
             foreach (var c in fullyQualifiedTypeName) {
@@ -66,7 +67,7 @@ namespace Stl.Reflection
                     break;
                 }
             }
-            return sb.ToString();
+            return sb.ToStringAndRelease();
         }
 
         private static int? GetAssemblyDelimiterIndex(string fullyQualifiedTypeName)

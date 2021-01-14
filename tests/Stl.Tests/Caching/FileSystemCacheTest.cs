@@ -25,15 +25,15 @@ namespace Stl.Tests.Caching
 
             (await cache.TryGetAsync(1)).Should().Be(Option.None<int>());
             await Assert.ThrowsAsync<KeyNotFoundException>(async () => await cache.GetAsync(1));
-            
+
             await cache.SetAsync(1, 1);
             (await cache.TryGetAsync(1)).Should().Be(Option.Some<int>(1));
             (await cache.GetAsync(1)).Should().Be(1);
-            
+
             (await cache.TryGetAsync(2)).Should().Be(Option.None<int>());
             await Assert.ThrowsAsync<KeyNotFoundException>(async () => await cache.GetAsync(2));
 
-            await cache.InvalidateAsync(1);
+            await cache.RemoveAsync(1);
             (await cache.TryGetAsync(1)).Should().Be(Option.None<int>());
             await Assert.ThrowsAsync<KeyNotFoundException>(async () => await cache.GetAsync(1));
         }

@@ -12,26 +12,26 @@ namespace Stl.Collections
         public T[] Buffer => _buffer.Buffer;
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private Collector(int capacity) 
-            => _buffer = ArrayBuffer<T>.Lease(capacity);
+        private Collector(bool mustClean, int capacity)
+            => _buffer = ArrayBuffer<T>.Lease(mustClean, capacity);
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static Collector<T> New()
-            => new Collector<T>(ArrayBuffer<T>.DefaultCapacity);
+        public static Collector<T> New(bool mustClean)
+            => new(mustClean, ArrayBuffer<T>.MinCapacity);
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static Collector<T> New(int capacity)
-            => new Collector<T>(capacity);
+        public static Collector<T> New(bool mustClean, int capacity)
+            => new(mustClean, capacity);
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public void Dispose()
             => _buffer.Dispose();
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public void Add(T item) 
+        public void Add(T item)
             => _buffer.Add(item);
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public Span<T>.Enumerator GetEnumerator() 
+        public Span<T>.Enumerator GetEnumerator()
             => _buffer.GetEnumerator();
     }
 }

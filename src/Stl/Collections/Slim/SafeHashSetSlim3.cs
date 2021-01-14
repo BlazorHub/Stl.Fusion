@@ -5,13 +5,13 @@ using System.Runtime.CompilerServices;
 
 namespace Stl.Collections.Slim
 {
-    public struct SafeHashSetSlim3<T>
+    public struct SafeHashSetSlim3<T> : IHashSetSlim<T>
         where T : notnull
     {
         private int _count;
         private (T, T, T) _tuple;
         private ImmutableHashSet<T>? _set;
-        
+
         private bool HasSet {
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
             get => _set != null;
@@ -41,7 +41,7 @@ namespace Stl.Collections.Slim
                 _set = set;
                 return true;
             }
-            
+
             // Item 1
             if (_count < 1) {
                 _tuple.Item1 = item;
@@ -84,7 +84,7 @@ namespace Stl.Collections.Slim
                 _set = set;
                 return true;
             }
-            
+
             // Item 1
             if (_count < 1) return false;
             if (EqualityComparer<T>.Default.Equals(_tuple.Item1, item)) {
@@ -97,6 +97,7 @@ namespace Stl.Collections.Slim
             if (_count < 2) return false;
             if (EqualityComparer<T>.Default.Equals(_tuple.Item2, item)) {
                 _tuple = (_tuple.Item1, _tuple.Item3, default)!;
+                _count--;
                 return true;
             }
 
@@ -133,7 +134,7 @@ namespace Stl.Collections.Slim
                 yield return _tuple.Item3;
             }
         }
-        
+
         public void Apply<TState>(TState state, Action<TState, T> action)
         {
             if (HasSet) {
@@ -148,7 +149,7 @@ namespace Stl.Collections.Slim
             if (_count < 3) return;
             action(state, _tuple.Item3);
         }
-        
+
         public void Aggregate<TState>(ref TState state, Aggregator<TState, T> aggregator)
         {
             if (HasSet) {
@@ -163,20 +164,21 @@ namespace Stl.Collections.Slim
             if (_count < 3) return;
             aggregator(ref state, _tuple.Item3);
         }
-        
-        public void Aggregate<TState>(TState state, Func<TState, T, TState> aggregator)
+
+        public TState Aggregate<TState>(TState state, Func<TState, T, TState> aggregator)
         {
             if (HasSet) {
                 foreach (var item in _set!)
                     state = aggregator(state, item);
-                return;
+                return state;
             }
-            if (_count < 1) return;
+            if (_count < 1) return state;
             state = aggregator(state, _tuple.Item1);
-            if (_count < 2) return;
+            if (_count < 2) return state;
             state = aggregator(state, _tuple.Item2);
-            if (_count < 3) return;
+            if (_count < 3) return state;
             state = aggregator(state, _tuple.Item3);
+            return state;
         }
 
         public void CopyTo(Span<T> target)

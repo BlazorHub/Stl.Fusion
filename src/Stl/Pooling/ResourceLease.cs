@@ -18,6 +18,7 @@ namespace Stl.Pooling
         {
             if (_releaser?.Release(Resource) ?? false)
                 return;
+            // ReSharper disable once HeapView.PossibleBoxingAllocation
             if (Resource is IDisposable d)
                 d.Dispose();
         }
@@ -26,8 +27,8 @@ namespace Stl.Pooling
 
         // Equality
 
-        public bool Equals(ResourceLease<T> other) 
-            => ReferenceEquals(_releaser, other._releaser) 
+        public bool Equals(ResourceLease<T> other)
+            => ReferenceEquals(_releaser, other._releaser)
                 && EqualityComparer<T>.Default.Equals(Resource, other.Resource);
         public override bool Equals(object? obj) => obj is ResourceLease<T> other && Equals(other);
         public override int GetHashCode() => HashCode.Combine(Resource, _releaser);

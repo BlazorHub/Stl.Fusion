@@ -9,10 +9,11 @@ namespace Stl.Text
     [Serializable]
     [JsonConverter(typeof(SymbolJsonConverter))]
     [TypeConverter(typeof(SymbolTypeConverter))]
-    public readonly struct Symbol : IEquatable<Symbol>, IComparable<Symbol>, ISerializable
+    public readonly struct Symbol : IEquatable<Symbol>, IComparable<Symbol>,
+        IConvertibleTo<string>, ISerializable
     {
         public static readonly Symbol Null = default;
-        public static readonly Symbol Empty = new Symbol("");
+        public static readonly Symbol Empty = new("");
 
         public readonly string Value;
         public readonly int HashCode;
@@ -22,17 +23,18 @@ namespace Stl.Text
             Value = value;
             HashCode = value?.GetHashCode() ?? 0;
         }
-        
-        public override string ToString() => $"`{Value}`";
-        
+
+        public override string ToString() => Value;
+
         // Conversion
-        
-        public static implicit operator Symbol(string source) => new Symbol(source);
+
+        string IConvertibleTo<string>.Convert() => Value;
+        public static implicit operator Symbol(string source) => new(source);
         public static implicit operator string(Symbol source) => source.Value;
 
         // Operators
 
-        public static Symbol operator +(Symbol left, Symbol right) => new Symbol(left.Value + right.Value);
+        public static Symbol operator +(Symbol left, Symbol right) => new(left.Value + right.Value);
 
         // Equality & comparison
 
@@ -45,13 +47,15 @@ namespace Stl.Text
 
         // Serialization
 
+#pragma warning disable CS8618
         private Symbol(SerializationInfo info, StreamingContext context)
         {
-            Value = info.GetString(nameof(Value));
+            Value = info.GetString(nameof(Value))!;
             HashCode = Value?.GetHashCode() ?? 0;
         }
+#pragma warning restore CS8618
 
-        void ISerializable.GetObjectData(SerializationInfo info, StreamingContext context) 
+        void ISerializable.GetObjectData(SerializationInfo info, StreamingContext context)
             => info.AddValue(nameof(Value), Value);
     }
 }

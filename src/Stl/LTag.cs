@@ -12,7 +12,7 @@ namespace Stl
     [TypeConverter(typeof(LTagTypeConverter))]
     public readonly struct LTag : IEquatable<LTag>
     {
-        public static readonly string Base62Digits = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"; 
+        public static readonly string Base62Digits = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
         public static readonly LTag Default = default;
 
         public readonly long Value;
@@ -29,26 +29,26 @@ namespace Stl
         public override string ToString()
         {
             unsafe {
-                Span<char> buffer = stackalloc char[12];
+                Span<char> buffer = stackalloc char[16];
                 buffer[0] = '@';
                 var n = MathEx.FormatTo(Value, Base62Digits, buffer.Slice(1));
                 return new string(buffer.Slice(0, n.Length + 1));
             }
         }
 
-        public static LTag Parse(string formattedLTag) 
-            => TryParse(formattedLTag, out var result) 
-                ? result 
+        public static LTag Parse(string? formattedLTag)
+            => TryParse(formattedLTag, out var result)
+                ? result
                 : throw new ArgumentOutOfRangeException(nameof(formattedLTag));
 
-        public static bool TryParse(string formattedLTag, out LTag lTag)
+        public static bool TryParse(string? formattedLTag, out LTag lTag)
         {
             lTag = default;
             if (formattedLTag == null || formattedLTag.Length < 2)
                 return false;
             if (formattedLTag[0] != '@')
                 return false;
-            if (!MathEx.TryParse(formattedLTag.AsSpan().Slice(1), Base62Digits, out var value)) 
+            if (!MathEx.TryParse(formattedLTag.AsSpan().Slice(1), Base62Digits, out var value))
                 return false;
             lTag = new LTag(value);
             return true;

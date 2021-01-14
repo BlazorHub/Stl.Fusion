@@ -4,8 +4,7 @@ namespace Stl.Comparison
 {
     public class HasIdEqualityComparer<T> : IEqualityComparer<IHasId<T>>
     {
-        public static readonly IEqualityComparer<IHasId<T>> Instance = 
-            new HasIdEqualityComparer<T>();
+        public static readonly IEqualityComparer<IHasId<T>> Instance = new HasIdEqualityComparer<T>();
 
         public bool Equals(IHasId<T>? x, IHasId<T>? y)
         {
@@ -14,7 +13,7 @@ namespace Stl.Comparison
             return y != null && EqualityComparer<T>.Default.Equals(x.Id, y.Id);
         }
 
-        public int GetHashCode(IHasId<T>? obj) 
-            => obj == null ? 0 : EqualityComparer<T>.Default.GetHashCode(obj.Id);
+        public int GetHashCode(IHasId<T>? obj)
+            => obj == null ? 0 : EqualityComparer<T>.Default.GetHashCode(obj.Id!);
     }
 }

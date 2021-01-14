@@ -2,6 +2,7 @@ using System;
 using System.IO;
 using System.Text;
 using Newtonsoft.Json;
+using Newtonsoft.Json.Serialization;
 
 namespace Stl.Serialization
 {
@@ -10,23 +11,26 @@ namespace Stl.Serialization
         private readonly JsonSerializer _jsonSerializer;
         private readonly StringBuilder _stringBuilder;
 
-        public static JsonSerializerSettings DefaultSettings => new JsonSerializerSettings() {
-            SerializationBinder = CrossPlatformSerializationBinder.Instance,
-            TypeNameAssemblyFormatHandling = TypeNameAssemblyFormatHandling.Simple,
-            TypeNameHandling = TypeNameHandling.Auto,
-            NullValueHandling = NullValueHandling.Ignore,
-        }; 
+        public static JsonSerializerSettings DefaultSettings { get; set; } =
+            new() {
+                SerializationBinder = CrossPlatformSerializationBinder.Instance,
+                TypeNameAssemblyFormatHandling = TypeNameAssemblyFormatHandling.Simple,
+                TypeNameHandling = TypeNameHandling.Auto,
+                NullValueHandling = NullValueHandling.Ignore,
+                ReferenceLoopHandling = ReferenceLoopHandling.Serialize,
+                ContractResolver = new DefaultContractResolver(),
+            };
 
         public JsonSerializerSettings Settings { get; }
 
         public JsonNetSerializer(JsonSerializerSettings? settings = null)
         {
-            Settings = settings ??= DefaultSettings; 
+            Settings = settings ??= DefaultSettings;
             _jsonSerializer = JsonSerializer.Create(settings);
             _stringBuilder = new StringBuilder(256);
         }
 
-        public override string Serialize(object? native, Type? type) 
+        public override string Serialize(object? native, Type? type)
         {
             _stringBuilder.Clear();
             using var stringWriter = new StringWriter(_stringBuilder);

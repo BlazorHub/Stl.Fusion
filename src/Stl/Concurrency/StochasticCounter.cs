@@ -8,9 +8,9 @@ namespace Stl.Concurrency
 {
     public sealed class StochasticCounter
     {
-        public static readonly int DefaultApproximationFactor = Math.Min(8, HardwareInfo.ProcessorCount);
+        public static readonly int DefaultApproximationFactor = Math.Min(8, HardwareInfo.GetProcessorCountPo2Factor());
 
-        private long _value = 0;  
+        private long _value = 0;
         private readonly uint _approximationMask;
         public int ApproximationStep { get; }
         public int ApproximationStepLog2 { get; }
@@ -22,7 +22,7 @@ namespace Stl.Concurrency
             set => Interlocked.Exchange(ref _value, value >> ApproximationStepLog2);
         }
 
-        public StochasticCounter() 
+        public StochasticCounter()
             : this(DefaultApproximationFactor) { }
         public StochasticCounter(int approximationFactor)
         {
